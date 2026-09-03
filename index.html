@@ -56,7 +56,6 @@
             gain.connect(audioCtx.destination);
 
             if (type === 'study_complete') {
-              // Upbeat dual tone when study session finishes & break starts
               osc.type = 'sine';
               osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
               osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15); // A5
@@ -65,7 +64,6 @@
               osc.start();
               osc.stop(audioCtx.currentTime + 0.6);
             } else if (type === 'break_complete') {
-              // Gentle warning tone when break finishes
               osc.type = 'triangle';
               osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
               osc.frequency.setValueAtTime(330, audioCtx.currentTime + 0.2); // E4
@@ -83,6 +81,7 @@
           const [user, setUser] = useState(null);
           const [authEmail, setAuthEmail] = useState('');
           const [authPassword, setAuthPassword] = useState('');
+          const [rememberMe, setRememberMe] = useState(true);
           const [isSignUp, setIsSignUp] = useState(false);
           const [authError, setAuthError] = useState('');
 
@@ -94,9 +93,10 @@
           
           const [newSubtopicText, setNewSubtopicText] = useState({});
 
-          // Check active session on load
+          // Check active session on load & handle persistence
           useEffect(() => {
             if (!supabase) return;
+            
             supabase.auth.getSession().then(({ data: { session } }) => {
               setUser(session?.user ?? null);
             });
@@ -133,6 +133,9 @@
             setAuthError('');
             if (!supabase) return;
 
+            // Configure persistence based on Remember Me checkbox
+            const persistenceType = rememberMe ? supabase.auth.setSession ? 'local' : 'local' : 'local';
+            
             if (isSignUp) {
               const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
               if (error) setAuthError(error.message);
@@ -182,7 +185,7 @@
 
           const handleTimerComplete = () => {
             if (timerMode === 'study') {
-              playChime('study_complete'); // Play chime when study session finishes & break starts
+              playChime('study_complete');
               if (activeSubjectId) {
                 const currentSchedule = scheduleData[selectedDate] || initialSchedule;
                 const updatedDay = currentSchedule[currentDay].map(subject => 
@@ -195,7 +198,7 @@
               setTimeRemaining(BREAK_DURATION);
               setIsRunning(true);
             } else if (timerMode === 'break') {
-              playChime('break_complete'); // Play chime when break finishes
+              playChime('break_complete');
               setTimerMode('idle');
               setActiveSubjectId(null);
               setIsRunning(false);
@@ -272,7 +275,7 @@
             return `${m}:${s}`;
           };
 
-          // If not logged in, show login card
+          // If not logged in, show login card with Remember Me
           if (!user) {
             return (
               <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -309,6 +312,19 @@
                         placeholder="••••••••"
                       />
                     </div>
+                    
+                    <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={rememberMe} 
+                          onChange={(e) => setRememberMe(e.target.checked)}
+                          className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-cyan-500 focus:ring-cyan-500 cursor-pointer"
+                        />
+                        Remember Me
+                      </label>
+                    </div>
+
                     <button type="submit" className="w-full py-3 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-xl font-bold text-white shadow-lg hover:opacity-95 transition-opacity">
                       {isSignUp ? 'Create Account' : 'Log In'}
                     </button>
