@@ -24,7 +24,7 @@
         
         // --- CONFIGURE YOUR SUPABASE HERE ---
         const SUPABASE_URL = 'https://lkltuvpdrebexvoekywb.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
         
         const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -54,14 +54,6 @@
           const [scheduleData, setScheduleData] = useState({});
           
           const [newSubtopicText, setNewSubtopicText] = useState({});
-          const [editingSubtopicId, setEditingSubtopicId] = useState(null);
-          const [editSubtopicText, setEditSubtopicText] = useState('');
-
-          const [chatMessages, setChatMessages] = useState([
-            { role: 'model', text: 'Hello! I am your AI Medical Study Coach powered by Gemini. Ask me for study tips, quick summaries, or motivation!' }
-          ]);
-          const [userInput, setUserInput] = useState('');
-          const [isAiLoading, setIsAiLoading] = useState(false);
 
           const schedule = scheduleData[selectedDate] || initialSchedule;
           const activeSubjectId = scheduleData[`${selectedDate}_activeSubject`] || null;
@@ -204,9 +196,16 @@
 
           const currentSubjects = schedule[currentDay] || initialSchedule[currentDay];
           const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
-          const totalTarget = currentSubjects.reduce((acc, curr) => acc + curr.target, 0);
-          const totalCompleted = currentSubjects.reduce((acc, curr) => acc + curr.completed, 0);
+          
+          // Combined calculations across both Day 1 and Day 2 (Total 14 hours target)
+          const day1Subjects = schedule.day1 || initialSchedule.day1;
+          const day2Subjects = schedule.day2 || initialSchedule.day2;
+          const day1Completed = day1Subjects.reduce((acc, curr) => acc + curr.completed, 0);
+          const day2Completed = day2Subjects.reduce((acc, curr) => acc + curr.completed, 0);
+          const totalCompleted = day1Completed + day2Completed;
+          const totalTarget = 14;
           const isDayCompleted = totalCompleted >= totalTarget;
+
           const recordedDates = Object.keys(scheduleData).filter(k => !k.includes('_activeSubject'));
 
           return (
@@ -293,50 +292,92 @@
                     </div>
 
                     {/* Schedule & Subtopics */}
-                    <div className="lg:col-span-7 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-4">
-                      <h2 className="text-xl font-bold text-slate-100">{currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}</h2>
-                      
-                      {currentSubjects.map(subject => {
-                        const isComplete = subject.completed >= subject.target;
-                        const isActive = activeSubjectId === subject.id && timerMode === 'study';
+                    <div className="lg:col-span-7 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-6 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <h2 className="text-xl font-bold text-slate-100">{currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}</h2>
+                          {isDayCompleted && (
+                            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                              ✓ 14h Goal Achieved!
+                            </span>
+                          )}
+                        </div>
+                        
+                        <div className="space-y-4">
+                          {currentSubjects.map(subject => {
+                            const isComplete = subject.completed >= subject.target;
+                            const isActive = activeSubjectId === subject.id && timerMode === 'study';
 
-                        return (
-                          <div key={subject.id} className={`p-4 rounded-2xl border ${isActive ? 'border-violet-500 bg-violet-950/20' : 'border-slate-800 bg-slate-950/40'}`}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div>
-                                <h3 className="font-bold text-slate-200">{subject.name}</h3>
-                                <p className="text-xs text-slate-400">{subject.completed} / {subject.target} sessions</p>
-                              </div>
-                              <button onClick={() => startStudySession(subject.id)} className="px-4 py-2 bg-slate-800 text-violet-400 rounded-xl text-xs font-bold hover:bg-slate-700">
-                                {isActive ? 'Running' : 'Start 50m'}
-                              </button>
-                            </div>
-
-                            {/* Subtopics Checklist */}
-                            <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
-                              <p className="text-xs font-bold text-slate-400 uppercase">Subtopics</p>
-                              {subject.subtopics && subject.subtopics.map(sub => (
-                                <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
-                                  <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-xs cursor-pointer ${sub.completed ? 'line-through text-slate-500' : 'text-slate-300'}`}>
-                                    {sub.name}
-                                  </span>
-                                  <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-rose-400 text-xs">×</button>
+                            return (
+                              <div key={subject.id} className={`p-4 rounded-2xl border ${isActive ? 'border-violet-500 bg-violet-950/20' : 'border-slate-800 bg-slate-950/40'}`}>
+                                <div className="flex items-center justify-between mb-2">
+                                  <div>
+                                    <h3 className="font-bold text-slate-200">{subject.name}</h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <p className="text-xs text-slate-400">{subject.completed} / {subject.target} sessions</p>
+                                      <div className="flex gap-1">
+                                        <button onClick={() => updateCompletedHours(subject.id, -1)} className="px-2 py-0.5 bg-slate-900 text-xs rounded border border-slate-800">-</button>
+                                        <button onClick={() => updateCompletedHours(subject.id, 1)} className="px-2 py-0.5 bg-slate-900 text-xs rounded border border-slate-800">+</button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <button onClick={() => startStudySession(subject.id)} className="px-4 py-2 bg-slate-800 text-violet-400 rounded-xl text-xs font-bold hover:bg-slate-700">
+                                    {isActive ? 'Running' : 'Start 50m'}
+                                  </button>
                                 </div>
-                              ))}
-                              <div className="flex gap-2 mt-2">
-                                <input 
-                                  type="text" 
-                                  value={newSubtopicText[subject.id] || ''}
-                                  onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
-                                  placeholder="Add subtopic..."
-                                  className="bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-xl px-3 py-1.5 flex-grow outline-none"
-                                />
-                                <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold">Add</button>
+
+                                {/* Subtopics Checklist */}
+                                <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
+                                  <p className="text-xs font-bold text-slate-400 uppercase">Subtopics</p>
+                                  {subject.subtopics && subject.subtopics.map(sub => (
+                                    <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                                      <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-xs cursor-pointer ${sub.completed ? 'line-through text-slate-500' : 'text-slate-300'}`}>
+                                        {sub.name}
+                                      </span>
+                                      <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-rose-400 text-xs">×</button>
+                                    </div>
+                                  ))}
+                                  <div className="flex gap-2 mt-2">
+                                    <input 
+                                      type="text" 
+                                      value={newSubtopicText[subject.id] || ''}
+                                      onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
+                                      placeholder="Add subtopic..."
+                                      className="bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-xl px-3 py-1.5 flex-grow outline-none"
+                                    />
+                                    <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold">Add</button>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* 14-Hour Daily Progress Bar Widget */}
+                      <div className="pt-6 border-t border-slate-800">
+                        <div className="flex items-center justify-between text-sm mb-2">
+                          <span className="font-bold text-slate-300">14-Hour Daily Study Goal</span>
+                          <span className={`font-extrabold px-3 py-1 rounded-lg border ${isDayCompleted ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-slate-800 text-slate-200 border-slate-700'}`}>
+                            {totalCompleted} / {totalTarget} hrs
+                          </span>
+                        </div>
+                        <div className="h-4 w-full bg-slate-950 rounded-full overflow-hidden shadow-inner p-0.5 border border-slate-800 relative">
+                          <div 
+                            className={`h-full transition-all duration-1000 ease-out rounded-full ${isDayCompleted ? 'bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-500 shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'bg-gradient-to-r from-cyan-500 via-violet-500 to-fuchsia-500'}`}
+                            style={{ width: `${Math.min(100, (totalCompleted / totalTarget) * 100)}%` }}
+                          ></div>
+                          {isDayCompleted && (
+                             <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full"></div>
+                          )}
+                        </div>
+                        {isDayCompleted && (
+                           <p className="text-center text-amber-400 font-bold mt-3 text-sm animate-bounce">
+                              🎉 Amazing job! 14 hours completed for today! 🎉
+                           </p>
+                        )}
+                      </div>
+
                     </div>
                   </div>
                 )}
