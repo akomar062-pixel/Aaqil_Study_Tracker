@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Med-Study Tracker</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Supabase JS -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-950 text-slate-200 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        
+        // --- CONFIGURE YOUR SUPABASE HERE ---
+        const SUPABASE_URL = 'https://lkltuvpdrebexvoekywb.supabase.co';
+        const SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE; 
+        
+        const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+        const STUDY_DURATION = 50 * 60;
+        const BREAK_DURATION = 10 * 60;
+
+        const initialSchedule = {
+          day1: [
+            { id: 'm1', name: 'Medicine', target: 4, completed: 0, subtopics: [] },
+            { id: 's1', name: 'Surgery', target: 4, completed: 0, subtopics: [] },
+            { id: 'c1', name: 'Commed', target: 4, completed: 0, subtopics: [] },
+            { id: 'p1', name: 'Psychiatry', target: 2, completed: 0, subtopics: [] },
+          ],
+          day2: [
+            { id: 'pe1', name: 'Pediatrics', target: 4, completed: 0, subtopics: [] },
+            { id: 'g1', name: 'Gyn & Obs', target: 4, completed: 0, subtopics: [] },
+            { id: 'f1', name: 'Forensic', target: 4, completed: 0, subtopics: [] },
+            { id: 'p2', name: 'Psychiatry', target: 2, completed: 0, subtopics: [] },
+          ]
+        };
+
+        function App() {
+          const getTodayString = () => new Date().toISOString().split('T')[0];
+          const [selectedDate, setSelectedDate] = useState(getTodayString());
+          const [currentDay, setCurrentDay] = useState('day1');
+          const [activeTab, setActiveTab] = useState('tracker');
+          const [scheduleData, setScheduleData] = useState({});
+          
+          const [newSubtopicText, setNewSubtopicText] = useState({});
+          const [editingSubtopicId, setEditingSubtopicId] = useState(null);
+          const [editSubtopicText, setEditSubtopicText] = useState('');
+
+          const [chatMessages, setChatMessages] = useState([
+            { role: 'model', text: 'Hello! I am your AI Medical Study Coach powered by Gemini. Ask me for study tips, quick summaries, or motivation!' }
+          ]);
+          const [userInput, setUserInput] = useState('');
+          const [isAiLoading, setIsAiLoading] = useState(false);
+
+          const schedule = scheduleData[selectedDate] || initialSchedule;
+          const activeSubjectId = scheduleData[`${selectedDate}_activeSubject`] || null;
+
+          const setActiveSubjectId = (id) => {
+            const updated = { ...scheduleData, [`${selectedDate}_activeSubject`]: id };
+            saveToSupabase(updated);
+          };
+
+          const [timerMode, setTimerMode] = useState('idle');
+          const [timeRemaining, setTimeRemaining] = useState(0);
+          const [isRunning, setIsRunning] = useState(false);
+
+          // Fetch from Supabase on date change
+          useEffect(() => {
+            async function fetchData() {
+              if (!supabase) return;
+              const { data } = await supabase
+                .from('study_records')
+                .select('*')
+                .eq('date_key', selectedDate)
+                .single();
+              
+              if (data && data.data) {
+                setScheduleData(prev => ({ ...prev, [selectedDate]: data.data }));
+              }
+            }
+            fetchData();
+          }, [selectedDate]);
+
+          const saveToSupabase = async (newFullState) => {
+            setScheduleData(newFullState);
+            if (!supabase) return;
+            const currentDayData = newFullState[selectedDate] || initialSchedule;
+            await supabase
+              .from('study_records')
+              .upsert({ date_key: selectedDate, data: currentDayData }, { onConflict: 'date_key' });
+          };
+
+          // Timer Countdown Logic
+          useEffect(() => {
+            let interval = null;
+            if (isRunning && timeRemaining > 0) {
+              interval = setInterval(() => setTimeRemaining(prev => prev - 1), 1000);
+            } else if (isRunning && timeRemaining === 0) {
+              handleTimerComplete();
+            }
+            return () => clearInterval(interval);
+          }, [isRunning, timeRemaining]);
+
+          const handleTimerComplete = () => {
+            if (timerMode === 'study') {
+              if (activeSubjectId) {
+                const currentSchedule = scheduleData[selectedDate] || initialSchedule;
+                const updatedDay = currentSchedule[currentDay].map(subject => 
+                  subject.id === activeSubjectId ? { ...subject, completed: subject.completed + 1 } : subject
+                );
+                const newFull = { ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } };
+                saveToSupabase(newFull);
+              }
+              setTimerMode('break');
+              setTimeRemaining(BREAK_DURATION);
+              setIsRunning(true);
+            } else if (timerMode === 'break') {
+              setTimerMode('idle');
+              setActiveSubjectId(null);
+              setIsRunning(false);
+            }
+          };
+
+          const startStudySession = (subjectId) => {
+            setActiveSubjectId(subjectId);
+            setTimerMode('study');
+            setTimeRemaining(STUDY_DURATION);
+            setIsRunning(true);
+          };
+
+          const toggleTimer = () => setIsRunning(!isRunning);
+          const stopTimer = () => { setIsRunning(false); setTimerMode('idle'); setActiveSubjectId(null); setTimeRemaining(0); };
+          const skipTimer = () => setTimeRemaining(0);
+
+          const updateCompletedHours = (subjectId, delta) => {
+            const currentSchedule = scheduleData[selectedDate] || initialSchedule;
+            const updatedDay = currentSchedule[currentDay].map(subject => {
+              if (subject.id === subjectId) {
+                return { ...subject, completed: Math.max(0, subject.completed + delta) };
+              }
+              return subject;
+            });
+            const newFull = { ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } };
+            saveToSupabase(newFull);
+          };
+
+          const addSubtopic = (subjectId) => {
+            const text = (newSubtopicText[subjectId] || '').trim();
+            if (!text) return;
+            const currentSchedule = scheduleData[selectedDate] || initialSchedule;
+            const updatedDay = currentSchedule[currentDay].map(subject => {
+              if (subject.id === subjectId) {
+                const newSub = { id: 'sub_' + Date.now(), name: text, completed: false };
+                return { ...subject, subtopics: [...(subject.subtopics || []), newSub] };
+              }
+              return subject;
+            });
+            saveToSupabase({ ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } });
+            setNewSubtopicText({ ...newSubtopicText, [subjectId]: '' });
+          };
+
+          const toggleSubtopic = (subjectId, subtopicId) => {
+            const currentSchedule = scheduleData[selectedDate] || initialSchedule;
+            const updatedDay = currentSchedule[currentDay].map(subject => {
+              if (subject.id === subjectId) {
+                const updatedSubs = (subject.subtopics || []).map(sub => 
+                  sub.id === subtopicId ? { ...sub, completed: !sub.completed } : sub
+                );
+                return { ...subject, subtopics: updatedSubs };
+              }
+              return subject;
+            });
+            saveToSupabase({ ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } });
+          };
+
+          const deleteSubtopic = (subjectId, subtopicId) => {
+            const currentSchedule = scheduleData[selectedDate] || initialSchedule;
+            const updatedDay = currentSchedule[currentDay].map(subject => {
+              if (subject.id === subjectId) {
+                const updatedSubs = (subject.subtopics || []).filter(sub => sub.id !== subtopicId);
+                return { ...subject, subtopics: updatedSubs };
+              }
+              return subject;
+            });
+            saveToSupabase({ ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } });
+          };
+
+          const formatTime = (seconds) => {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = (seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+          };
+
+          const currentSubjects = schedule[currentDay] || initialSchedule[currentDay];
+          const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
+          const totalTarget = currentSubjects.reduce((acc, curr) => acc + curr.target, 0);
+          const totalCompleted = currentSubjects.reduce((acc, curr) => acc + curr.completed, 0);
+          const isDayCompleted = totalCompleted >= totalTarget;
+          const recordedDates = Object.keys(scheduleData).filter(k => !k.includes('_activeSubject'));
+
+          return (
+            <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans">
+              <div className="max-w-5xl mx-auto space-y-6">
+                
+                {/* Header */}
+                <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
+                  <div>
+                    <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
+                      Med-Study Tracker 🚀
+                    </h1>
+                    <p className="text-slate-400 text-sm mt-1">Cloud-Synced Study Blocks & Subtopics</p>
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 items-center">
+                    <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                      <button onClick={() => setActiveTab('tracker')} className={`px-4 py-2 rounded-xl text-sm font-bold ${activeTab === 'tracker' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400'}`}>Timer</button>
+                      <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-xl text-sm font-bold ${activeTab === 'history' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400'}`}>History</button>
+                    </div>
+
+                    {activeTab === 'tracker' && (
+                      <>
+                        <input 
+                          type="date" 
+                          value={selectedDate} 
+                          onChange={(e) => setSelectedDate(e.target.value)}
+                          className="bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl p-2.5 outline-none cursor-pointer"
+                        />
+                        <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                          <button onClick={() => setCurrentDay('day1')} className={`px-4 py-2 rounded-xl font-bold text-sm ${currentDay === 'day1' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 1</button>
+                          <button onClick={() => setCurrentDay('day2')} className={`px-4 py-2 rounded-xl font-bold text-sm ${currentDay === 'day2' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 2</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </header>
+
+                {activeTab === 'history' ? (
+                  <div className="bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-6">
+                    <h2 className="text-2xl font-bold text-slate-100">Study History & Heatmap</h2>
+                    {recordedDates.length === 0 ? (
+                      <p className="text-slate-500">No recorded days yet. Start studying to see your history boxes!</p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                        {recordedDates.map(date => (
+                          <div key={date} onClick={() => { setSelectedDate(date); setActiveTab('tracker'); }} className="p-4 rounded-2xl bg-slate-950 border border-slate-800 cursor-pointer hover:border-cyan-500 transition-all">
+                            <p className="font-bold text-cyan-400 mb-2">{date}</p>
+                            <p className="text-sm text-slate-400">Click to view session</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Timer Box */}
+                    <div className="lg:col-span-5 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 flex flex-col items-center justify-center text-center">
+                      {timerMode === 'idle' ? (
+                        <div className="mb-6 text-slate-500">
+                          <h2 className="text-xl font-bold text-slate-300">Ready to Focus?</h2>
+                          <p className="text-sm mt-1">Select a subject to start 50m.</p>
+                        </div>
+                      ) : (
+                        <div className="mb-6">
+                          <span className="px-4 py-1.5 rounded-full text-xs font-bold bg-violet-900/40 text-violet-300 border border-violet-700/50">
+                            {timerMode === 'study' ? 'Focus Session' : 'Break Time'}
+                          </span>
+                          {timerMode === 'study' && activeSubject && <h3 className="text-xl font-bold text-slate-100 mt-2">{activeSubject.name}</h3>}
+                        </div>
+                      )}
+
+                      <div className="text-7xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400">
+                        {timerMode === 'idle' ? '50:00' : formatTime(timeRemaining)}
+                      </div>
+
+                      <div className="flex gap-4">
+                        <button onClick={toggleTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-violet-600 text-white disabled:opacity-30">
+                          {isRunning ? 'Pause' : 'Play'}
+                        </button>
+                        <button onClick={stopTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30">Stop</button>
+                        <button onClick={skipTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30">Skip</button>
+                      </div>
+                    </div>
+
+                    {/* Schedule & Subtopics */}
+                    <div className="lg:col-span-7 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-4">
+                      <h2 className="text-xl font-bold text-slate-100">{currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}</h2>
+                      
+                      {currentSubjects.map(subject => {
+                        const isComplete = subject.completed >= subject.target;
+                        const isActive = activeSubjectId === subject.id && timerMode === 'study';
+
+                        return (
+                          <div key={subject.id} className={`p-4 rounded-2xl border ${isActive ? 'border-violet-500 bg-violet-950/20' : 'border-slate-800 bg-slate-950/40'}`}>
+                            <div className="flex items-center justify-between mb-2">
+                              <div>
+                                <h3 className="font-bold text-slate-200">{subject.name}</h3>
+                                <p className="text-xs text-slate-400">{subject.completed} / {subject.target} sessions</p>
+                              </div>
+                              <button onClick={() => startStudySession(subject.id)} className="px-4 py-2 bg-slate-800 text-violet-400 rounded-xl text-xs font-bold hover:bg-slate-700">
+                                {isActive ? 'Running' : 'Start 50m'}
+                              </button>
+                            </div>
+
+                            {/* Subtopics Checklist */}
+                            <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
+                              <p className="text-xs font-bold text-slate-400 uppercase">Subtopics</p>
+                              {subject.subtopics && subject.subtopics.map(sub => (
+                                <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
+                                  <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-xs cursor-pointer ${sub.completed ? 'line-through text-slate-500' : 'text-slate-300'}`}>
+                                    {sub.name}
+                                  </span>
+                                  <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-rose-400 text-xs">×</button>
+                                </div>
+                              ))}
+                              <div className="flex gap-2 mt-2">
+                                <input 
+                                  type="text" 
+                                  value={newSubtopicText[subject.id] || ''}
+                                  onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
+                                  placeholder="Add subtopic..."
+                                  className="bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-xl px-3 py-1.5 flex-grow outline-none"
+                                />
+                                <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold">Add</button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          );
+        }
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
