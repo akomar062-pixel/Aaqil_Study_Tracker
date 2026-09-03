@@ -47,6 +47,12 @@
         };
 
         function App() {
+          const [user, setUser] = useState(null);
+          const [authEmail, setAuthEmail] = useState('');
+          const [authPassword, setAuthPassword] = useState('');
+          const [isSignUp, setIsSignUp] = useState(false);
+          const [authError, setAuthError] = useState('');
+
           const getTodayString = () => new Date().toISOString().split('T')[0];
           const [selectedDate, setSelectedDate] = useState(getTodayString());
           const [currentDay, setCurrentDay] = useState('day1');
@@ -54,6 +60,59 @@
           const [scheduleData, setScheduleData] = useState({});
           
           const [newSubtopicText, setNewSubtopicText] = useState({});
+
+          // Check active session on load
+          useEffect(() => {
+            if (!supabase) return;
+            supabase.auth.getSession().then(({ data: { session } }) => {
+              setUser(session?.user ?? null);
+            });
+
+            const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+              setUser(session?.user ?? null);
+            });
+
+            return () => subscription.unsubscribe();
+          }, []);
+
+          // Fetch from Supabase on date change or login
+          useEffect(() => {
+            async function fetchData() {
+              if (!supabase || !user) return;
+              const { data } = await supabase
+                .from('study_records')
+                .select('*')
+                .eq('user_id', user.id)
+                .eq('date_key', selectedDate)
+                .single();
+              
+              if (data && data.data) {
+                setScheduleData(prev => ({ ...prev, [selectedDate]: data.data }));
+              } else {
+                setScheduleData(prev => ({ ...prev, [selectedDate]: initialSchedule }));
+              }
+            }
+            fetchData();
+          }, [selectedDate, user]);
+
+          const handleAuth = async (e) => {
+            e.preventDefault();
+            setAuthError('');
+            if (!supabase) return;
+
+            if (isSignUp) {
+              const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+              if (error) setAuthError(error.message);
+              else alert('Signup successful! You can now log in.');
+            } else {
+              const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+              if (error) setAuthError(error.message);
+            }
+          };
+
+          const handleLogout = async () => {
+            if (supabase) await supabase.auth.signOut();
+          };
 
           const schedule = scheduleData[selectedDate] || initialSchedule;
           const activeSubjectId = scheduleData[`${selectedDate}_activeSubject`] || null;
@@ -67,30 +126,14 @@
           const [timeRemaining, setTimeRemaining] = useState(0);
           const [isRunning, setIsRunning] = useState(false);
 
-          // Fetch from Supabase on date change
-          useEffect(() => {
-            async function fetchData() {
-              if (!supabase) return;
-              const { data } = await supabase
-                .from('study_records')
-                .select('*')
-                .eq('date_key', selectedDate)
-                .single();
-              
-              if (data && data.data) {
-                setScheduleData(prev => ({ ...prev, [selectedDate]: data.data }));
-              }
-            }
-            fetchData();
-          }, [selectedDate]);
-
           const saveToSupabase = async (newFullState) => {
             setScheduleData(newFullState);
-            if (!supabase) return;
+            if (!supabase || !user) return;
             const currentDayData = newFullState[selectedDate] || initialSchedule;
+            
             await supabase
               .from('study_records')
-              .upsert({ date_key: selectedDate, data: currentDayData }, { onConflict: 'date_key' });
+              .upsert({ user_id: user.id, date_key: selectedDate, data: currentDayData }, { onConflict: 'user_id,date_key' });
           };
 
           // Timer Countdown Logic
@@ -194,10 +237,60 @@
             return `${m}:${s}`;
           };
 
+          // If not logged in, show login card
+          if (!user) {
+            return (
+              <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full shadow-2xl space-y-6">
+                  <div>
+                    <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-violet-400">
+                      Med-Study Tracker 🚀
+                    </h1>
+                    <p className="text-slate-400 text-sm mt-1">Log in to access your cloud study data</p>
+                  </div>
+
+                  {authError && <div className="p-3 bg-rose-950/50 border border-rose-800 text-rose-300 text-xs rounded-xl">{authError}</div>}
+
+                  <form onSubmit={handleAuth} className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase">Email</label>
+                      <input 
+                        type="email" 
+                        required
+                        value={authEmail} 
+                        onChange={(e) => setAuthEmail(e.target.value)} 
+                        className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 outline-none focus:border-cyan-500"
+                        placeholder="friend@email.com"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 uppercase">Password</label>
+                      <input 
+                        type="password" 
+                        required
+                        value={authPassword} 
+                        onChange={(e) => setAuthPassword(e.target.value)} 
+                        className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 outline-none focus:border-cyan-500"
+                        placeholder="••••••••"
+                      />
+                    </div>
+                    <button type="submit" className="w-full py-3 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-xl font-bold text-white shadow-lg hover:opacity-95 transition-opacity">
+                      {isSignUp ? 'Create Account' : 'Log In'}
+                    </button>
+                  </form>
+
+                  <div className="text-center">
+                    <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-cyan-400 hover:underline">
+                      {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
           const currentSubjects = schedule[currentDay] || initialSchedule[currentDay];
           const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
-          
-          // Combined calculations across both Day 1 and Day 2 (Total 14 hours target)
           const day1Subjects = schedule.day1 || initialSchedule.day1;
           const day2Subjects = schedule.day2 || initialSchedule.day2;
           const day1Completed = day1Subjects.reduce((acc, curr) => acc + curr.completed, 0);
@@ -205,7 +298,6 @@
           const totalCompleted = day1Completed + day2Completed;
           const totalTarget = 14;
           const isDayCompleted = totalCompleted >= totalTarget;
-
           const recordedDates = Object.keys(scheduleData).filter(k => !k.includes('_activeSubject'));
 
           return (
@@ -218,10 +310,14 @@
                     <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
                       Med-Study Tracker 🚀
                     </h1>
-                    <p className="text-slate-400 text-sm mt-1">Cloud-Synced Study Blocks & Subtopics</p>
+                    <p className="text-slate-400 text-sm mt-1">Logged in as: <span className="text-cyan-400 font-semibold">{user.email}</span></p>
                   </div>
 
                   <div className="flex flex-wrap gap-3 items-center">
+                    <button onClick={handleLogout} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs font-bold rounded-xl border border-slate-700">
+                      Log Out
+                    </button>
+
                     <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
                       <button onClick={() => setActiveTab('tracker')} className={`px-4 py-2 rounded-xl text-sm font-bold ${activeTab === 'tracker' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400'}`}>Timer</button>
                       <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-xl text-sm font-bold ${activeTab === 'history' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400'}`}>History</button>
@@ -305,7 +401,6 @@
                         
                         <div className="space-y-4">
                           {currentSubjects.map(subject => {
-                            const isComplete = subject.completed >= subject.target;
                             const isActive = activeSubjectId === subject.id && timerMode === 'study';
 
                             return (
