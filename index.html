@@ -80,12 +80,10 @@
             gainNode.connect(ctx.destination);
             
             if (type === 'study-end') {
-              // Smooth, pleasant chime for break time
               osc.type = 'sine';
               osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
               osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.2); // E5
             } else {
-              // Sharp tone to get back to work
               osc.type = 'triangle';
               osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
               osc.frequency.setValueAtTime(440, ctx.currentTime + 0.2); // A4
@@ -111,8 +109,15 @@
           const [authLoading, setAuthLoading] = useState(false);
           const [rememberMe, setRememberMe] = useState(true);
 
-          // Tracker State
-          const getTodayString = () => new Date().toISOString().split('T')[0];
+          // Tracker State - Automatically gets today's real date (YYYY-MM-DD in local time)
+          const getTodayString = () => {
+            const now = new Date();
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          };
+
           const [selectedDate, setSelectedDate] = useState(getTodayString());
           const [currentDay, setCurrentDay] = useState('day1');
           const [scheduleData, setScheduleData] = useState({});
@@ -123,16 +128,16 @@
           const [timeRemaining, setTimeRemaining] = useState(0);
           const [isRunning, setIsRunning] = useState(false);
           const [activeSubjectId, setActiveSubjectId] = useState(null);
+          
+          const [dbError, setDbError] = useState(null);
 
           useEffect(() => {
             if (!supabase) return;
             
-            // Check active session
             supabase.auth.getSession().then(({ data: { session } }) => {
               setUser(session?.user ?? null);
             });
 
-            // Listen for auth changes (login/logout)
             const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
               setUser(session?.user ?? null);
             });
@@ -167,12 +172,14 @@
             }
           };
 
+          // Fetch Data specifically mapped to the selectedDate and user
           useEffect(() => {
             async function fetchData() {
               if (!supabase || !user) return;
               
+              setDbError(null);
+              
               try {
-                // Fetch data specifically for this user and this date
                 const { data, error } = await supabase
                   .from('study_records')
                   .select('data')
@@ -184,7 +191,6 @@
                 if (data && data.length > 0) {
                   const savedData = data[0].data;
                   
-                  // SMART MERGE: Keep saved checkmarks and hours, but pull in template structure
                   const mergeDay = (savedDay, initialDay) => {
                     return initialDay.map(initialSubj => {
                       const savedSubj = (savedDay || []).find(s => s.id === initialSubj.id);
@@ -202,44 +208,47 @@
 
                   setScheduleData(prev => ({ ...prev, [selectedDate]: mergedData }));
                 } else {
-                  // No data found for this date, load fresh template
+                  // Fresh template for this specific date
                   setScheduleData(prev => ({ ...prev, [selectedDate]: initialSchedule }));
                 }
               } catch (err) {
                 console.error("Error fetching data:", err);
+                setDbError(`Failed to load data for ${selectedDate}: ${err.message}.`);
               }
             }
             fetchData();
           }, [selectedDate, user]);
 
           const saveToSupabase = async (newDateData) => {
-            // Instantly update UI for snappy feel
             setScheduleData(prev => ({ ...prev, [selectedDate]: newDateData }));
+            setDbError(null);
             
             if (!supabase || !user) return;
             
             try {
-              // Check if a row already exists for this user + date
-              const { data: existing } = await supabase
+              const { data: existing, error: selectError } = await supabase
                 .from('study_records')
                 .select('id')
                 .eq('user_id', user.id)
                 .eq('date_key', selectedDate);
+                
+              if (selectError) throw selectError;
 
               if (existing && existing.length > 0) {
-                // Update existing row
-                await supabase
+                const { error: updateError } = await supabase
                   .from('study_records')
                   .update({ data: newDateData })
                   .eq('id', existing[0].id);
+                if (updateError) throw updateError;
               } else {
-                // Insert brand new row
-                await supabase
+                const { error: insertError } = await supabase
                   .from('study_records')
                   .insert([{ user_id: user.id, date_key: selectedDate, data: newDateData }]);
+                if (insertError) throw insertError;
               }
             } catch (err) {
               console.error("Error saving data:", err);
+              setDbError(`Failed to save progress: ${err.message}. (Check Supabase RLS policies!)`);
             }
           };
 
@@ -255,7 +264,7 @@
 
           const handleTimerComplete = () => {
             if (timerMode === 'study') {
-              playAudioNotification('study-end'); // 🎵 Play Study Finished Sound
+              playAudioNotification('study-end');
               
               if (activeSubjectId) {
                 const currentSchedule = scheduleData[selectedDate] || initialSchedule;
@@ -269,7 +278,7 @@
               setIsRunning(true);
               
             } else if (timerMode === 'break') {
-              playAudioNotification('break-end'); // 🎵 Play Break Finished Sound
+              playAudioNotification('break-end');
               setTimerMode('idle');
               setActiveSubjectId(null);
               setIsRunning(false);
@@ -377,11 +386,10 @@
           const currentSubjects = (scheduleData[selectedDate] || initialSchedule)[currentDay] || [];
           const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
           
-          // Calculate 14 Hour Progress (Across both days for the selected date)
-          const allSubjectsDay1 = (scheduleData[selectedDate] || initialSchedule).day1 || [];
-          const allSubjectsDay2 = (scheduleData[selectedDate] || initialSchedule).day2 || [];
-          const totalCompletedHours = allSubjectsDay1.reduce((acc, curr) => acc + curr.completed, 0) + 
-                                      allSubjectsDay2.reduce((acc, curr) => acc + curr.completed, 0);
+          // 14-Hour Progress calculation for the currently selected date
+          const dateSchedule = scheduleData[selectedDate] || initialSchedule;
+          const totalCompletedHours = (dateSchedule.day1 || []).reduce((acc, curr) => acc + curr.completed, 0) + 
+                                      (dateSchedule.day2 || []).reduce((acc, curr) => acc + curr.completed, 0);
           
           const isTargetMet = totalCompletedHours >= TARGET_DAILY_HOURS;
           const progressPercent = Math.min(100, (totalCompletedHours / TARGET_DAILY_HOURS) * 100);
@@ -389,7 +397,19 @@
           return (
             <div className="max-w-6xl mx-auto space-y-8 p-4 md:p-8">
               
-              {/* Top Header */}
+              {dbError && (
+                <div className="bg-rose-900/90 text-rose-200 p-4 rounded-2xl border-2 border-rose-500 shadow-lg flex items-center justify-between animate-pulse">
+                  <div className="flex items-center gap-3">
+                    <i className="fas fa-triangle-exclamation text-2xl text-rose-400"></i>
+                    <div>
+                        <strong className="block text-lg">Cloud Sync Failed!</strong>
+                        <span className="text-sm">{dbError}</span>
+                    </div>
+                  </div>
+                  <button onClick={() => setDbError(null)} className="text-rose-400 hover:text-rose-200"><i className="fas fa-xmark text-xl"></i></button>
+                </div>
+              )}
+
               <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
                 <div className="relative z-10">
                   <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
@@ -421,7 +441,7 @@
                     <h2 className={`font-extrabold text-2xl flex items-center gap-3 ${isTargetMet ? 'text-amber-400' : 'text-slate-100'}`}>
                       Daily Target: 14 Hours {isTargetMet && <i className="fas fa-trophy text-amber-500"></i>}
                     </h2>
-                    <p className="text-base text-slate-400 mt-1">Combined sessions across Day 1 & Day 2</p>
+                    <p className="text-base text-slate-400 mt-1">Total hours completed on {selectedDate}</p>
                   </div>
                   <span className={`font-black text-3xl ${isTargetMet ? 'text-amber-400' : 'text-cyan-400'}`}>
                     {totalCompletedHours} <span className="text-xl text-slate-500 font-bold">/ 14</span>
@@ -437,7 +457,7 @@
                 
                 {isTargetMet && (
                   <p className="text-amber-400 text-center font-bold mt-5 text-lg animate-bounce flex justify-center items-center gap-2">
-                    <i className="fas fa-star"></i> Incredible! You hit your 14-hour study goal! <i className="fas fa-star"></i>
+                    <i className="fas fa-star"></i> Incredible! You hit your 14-hour study goal for {selectedDate}! <i className="fas fa-star"></i>
                   </p>
                 )}
               </div>
@@ -485,7 +505,7 @@
                 <div className="lg:col-span-7 bg-slate-900 p-8 rounded-3xl border border-slate-800 space-y-5 shadow-xl">
                   <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3 mb-6">
                     <i className="fas fa-list-check text-violet-400"></i>
-                    {currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}
+                    {currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'} — <span className="text-cyan-400">{selectedDate}</span>
                   </h2>
                   
                   {currentSubjects.map(subject => {
@@ -517,12 +537,10 @@
                           )}
                         </div>
 
-                        {/* Mini progress bar for subject */}
                         <div className="h-2.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800 mb-5">
                           <div className={`h-full transition-all duration-700 ${isComplete ? 'bg-cyan-500' : 'bg-violet-500'}`} style={{ width: `${Math.min(100, (subject.completed / subject.target) * 100)}%` }}></div>
                         </div>
 
-                        {/* Subtopics Checklist Section */}
                         <div className="pt-4 border-t border-slate-800/80 space-y-3">
                           <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Subtopics Checklist</p>
                           
