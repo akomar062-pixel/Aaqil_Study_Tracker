@@ -4,43 +4,53 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Med-Study Tracker</title>
-    <!-- Tailwind CSS -->
+    
+    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    
     <!-- React & ReactDOM -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <!-- Babel for JSX -->
+    
+    <!-- Babel for compiling JSX in the browser -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Lucide Icons -->
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Supabase JS -->
+    
+    <!-- FontAwesome for robust, crash-free icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Supabase JS Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     
     <style>
-        .gold-glow { box-shadow: 0 0 20px rgba(251, 191, 36, 0.6); }
+        /* Custom Animations for 14-Hour Progress Bar */
+        .gold-glow { box-shadow: 0 0 25px rgba(251, 191, 36, 0.7); }
         .progress-pulse { animation: pulse-gold 2s infinite; }
         @keyframes pulse-gold {
             0% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
-            50% { box-shadow: 0 0 25px rgba(251, 191, 36, 0.8); }
+            50% { box-shadow: 0 0 30px rgba(251, 191, 36, 0.9); }
             100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
         }
+        /* Hide scrollbar for a cleaner look */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
     </style>
 </head>
-<body class="bg-slate-950 text-slate-200 min-h-screen font-sans">
+<body class="bg-slate-950 text-slate-200 min-h-screen font-sans text-lg">
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
-        const { Play, Pause, Square, CheckCircle, SkipForward, Coffee, LogOut, Sparkles } = window.lucide;
         
-        // --- CONFIGURE YOUR SUPABASE HERE ---
+        // --- ⚠️ CONFIGURE YOUR SUPABASE HERE ---
         const SUPABASE_URL = 'https://lkltuvpdrebexvoekywb.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; // <-- PASTE YOUR KEY HERE
         
         const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-        const STUDY_DURATION = 50 * 60; // 50 mins
-        const BREAK_DURATION = 10 * 60; // 10 mins
+        const STUDY_DURATION = 50 * 60; // 50 mins in seconds
+        const BREAK_DURATION = 10 * 60; // 10 mins in seconds
+        const TARGET_DAILY_HOURS = 14;
 
         const initialSchedule = {
           day1: [
@@ -57,31 +67,37 @@
           ]
         };
 
-        // --- Audio Notification Function ---
-        const playBeep = (type) => {
+        const playAudioNotification = (type) => {
           try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            
+            const ctx = new AudioContext();
             const osc = ctx.createOscillator();
             const gainNode = ctx.createGain();
+            
             osc.connect(gainNode);
             gainNode.connect(ctx.destination);
             
             if (type === 'study-end') {
-              osc.type = 'sine'; // Smooth tone for break time
+              // Smooth, pleasant chime for break time
+              osc.type = 'sine';
               osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
               osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.2); // E5
             } else {
-              osc.type = 'triangle'; // Sharp tone for get back to work
+              // Sharp tone to get back to work
+              osc.type = 'triangle';
               osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
               osc.frequency.setValueAtTime(440, ctx.currentTime + 0.2); // A4
             }
             
             gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
             gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+            
             osc.start(ctx.currentTime);
             osc.stop(ctx.currentTime + 0.8);
           } catch (err) {
-            console.log("Audio blocked by browser", err);
+            console.log("Audio blocked by browser, please interact with the page first.", err);
           }
         };
 
@@ -108,15 +124,19 @@
           const [isRunning, setIsRunning] = useState(false);
           const [activeSubjectId, setActiveSubjectId] = useState(null);
 
-          // --- Authentication Check ---
           useEffect(() => {
             if (!supabase) return;
+            
+            // Check active session
             supabase.auth.getSession().then(({ data: { session } }) => {
               setUser(session?.user ?? null);
             });
+
+            // Listen for auth changes (login/logout)
             const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
               setUser(session?.user ?? null);
             });
+            
             return () => subscription.unsubscribe();
           }, []);
 
@@ -132,7 +152,7 @@
               } else {
                 const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
                 if (error) throw error;
-                alert("Account created! You are now logged in.");
+                alert("Account created successfully! You are now logged in.");
               }
             } catch (err) {
               setAuthError(err.message);
@@ -147,13 +167,12 @@
             }
           };
 
-          // --- Bulletproof Data Fetching & Smart Merging ---
           useEffect(() => {
             async function fetchData() {
               if (!supabase || !user) return;
               
               try {
-                // Use .select() instead of .single() to avoid 406 Not Found errors on empty days
+                // Fetch data specifically for this user and this date
                 const { data, error } = await supabase
                   .from('study_records')
                   .select('data')
@@ -165,7 +184,7 @@
                 if (data && data.length > 0) {
                   const savedData = data[0].data;
                   
-                  // SMART MERGE: Keep saved checkmarks and hours, but pull in new template structure
+                  // SMART MERGE: Keep saved checkmarks and hours, but pull in template structure
                   const mergeDay = (savedDay, initialDay) => {
                     return initialDay.map(initialSubj => {
                       const savedSubj = (savedDay || []).find(s => s.id === initialSubj.id);
@@ -193,15 +212,14 @@
             fetchData();
           }, [selectedDate, user]);
 
-          // --- Bulletproof Data Saving ---
           const saveToSupabase = async (newDateData) => {
-            // Update UI instantly
+            // Instantly update UI for snappy feel
             setScheduleData(prev => ({ ...prev, [selectedDate]: newDateData }));
             
             if (!supabase || !user) return;
             
             try {
-              // 1. Check if row exists
+              // Check if a row already exists for this user + date
               const { data: existing } = await supabase
                 .from('study_records')
                 .select('id')
@@ -209,13 +227,13 @@
                 .eq('date_key', selectedDate);
 
               if (existing && existing.length > 0) {
-                // 2a. Update existing row
+                // Update existing row
                 await supabase
                   .from('study_records')
                   .update({ data: newDateData })
                   .eq('id', existing[0].id);
               } else {
-                // 2b. Insert new row
+                // Insert brand new row
                 await supabase
                   .from('study_records')
                   .insert([{ user_id: user.id, date_key: selectedDate, data: newDateData }]);
@@ -225,7 +243,6 @@
             }
           };
 
-          // --- Timer Logic ---
           useEffect(() => {
             let interval = null;
             if (isRunning && timeRemaining > 0) {
@@ -238,7 +255,8 @@
 
           const handleTimerComplete = () => {
             if (timerMode === 'study') {
-              playBeep('study-end'); // Play Chime
+              playAudioNotification('study-end'); // 🎵 Play Study Finished Sound
+              
               if (activeSubjectId) {
                 const currentSchedule = scheduleData[selectedDate] || initialSchedule;
                 const updatedDay = currentSchedule[currentDay].map(subject => 
@@ -251,7 +269,7 @@
               setIsRunning(true);
               
             } else if (timerMode === 'break') {
-              playBeep('break-end'); // Play Chime
+              playAudioNotification('break-end'); // 🎵 Play Break Finished Sound
               setTimerMode('idle');
               setActiveSubjectId(null);
               setIsRunning(false);
@@ -269,7 +287,6 @@
           const stopTimer = () => { setIsRunning(false); setTimerMode('idle'); setActiveSubjectId(null); setTimeRemaining(0); };
           const skipTimer = () => setTimeRemaining(0);
 
-          // --- Subtopics Logic ---
           const addSubtopic = (subjectId) => {
             const text = (newSubtopicText[subjectId] || '').trim();
             if (!text) return;
@@ -317,154 +334,157 @@
             return `${m}:${s}`;
           };
 
-          // --- Render Auth View ---
           if (!user) {
             return (
               <div className="min-h-screen flex items-center justify-center p-4">
-                <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl w-full max-w-md">
-                  <h1 className="text-3xl font-extrabold text-cyan-400 mb-2 flex items-center gap-2">
-                    Med-Study <span className="text-violet-400">Tracker</span> 🚀
+                <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl w-full max-w-lg">
+                  <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400 mb-2 flex items-center gap-3">
+                    Med-Study Tracker <i className="fas fa-rocket text-cyan-400 text-3xl"></i>
                   </h1>
-                  <p className="text-slate-400 mb-6">Log in to sync your study data to the cloud.</p>
+                  <p className="text-slate-400 text-lg mb-8">Log in to sync your study data to your private cloud.</p>
                   
-                  {authError && <div className="bg-rose-900/30 text-rose-400 p-3 rounded-lg mb-4 text-sm border border-rose-800/50">{authError}</div>}
+                  {authError && <div className="bg-rose-900/30 text-rose-400 p-4 rounded-xl mb-6 text-base border border-rose-800/50 flex items-center gap-2"><i className="fas fa-circle-exclamation"></i> {authError}</div>}
                   
-                  <form onSubmit={handleAuth} className="space-y-4">
+                  <form onSubmit={handleAuth} className="space-y-6">
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 mb-1">EMAIL</label>
-                      <input type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 outline-none focus:border-cyan-500 transition" />
+                      <label className="block text-sm font-bold text-slate-400 mb-2">EMAIL ADDRESS</label>
+                      <input type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-4 text-xl text-slate-200 outline-none focus:border-cyan-500 transition shadow-inner" placeholder="doctor@medschool.com" />
                     </div>
                     <div>
-                      <label className="block text-xs font-bold text-slate-400 mb-1">PASSWORD</label>
-                      <input type="password" required value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 outline-none focus:border-cyan-500 transition" />
+                      <label className="block text-sm font-bold text-slate-400 mb-2">PASSWORD</label>
+                      <input type="password" required value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-2xl px-5 py-4 text-xl text-slate-200 outline-none focus:border-cyan-500 transition shadow-inner" placeholder="••••••••" />
                     </div>
                     
-                    <div className="flex items-center gap-2 mt-2">
-                      <input type="checkbox" id="remember" checked={rememberMe} onChange={() => setRememberMe(!rememberMe)} className="w-4 h-4 accent-cyan-500 cursor-pointer" />
-                      <label htmlFor="remember" className="text-sm text-slate-400 cursor-pointer">Remember me</label>
+                    <div className="flex items-center gap-3 mt-4">
+                      <input type="checkbox" id="remember" checked={rememberMe} onChange={() => setRememberMe(!rememberMe)} className="w-5 h-5 accent-cyan-500 cursor-pointer rounded" />
+                      <label htmlFor="remember" className="text-base text-slate-300 cursor-pointer font-medium">Remember me (Keep me logged in)</label>
                     </div>
 
-                    <button type="submit" disabled={authLoading} className="w-full bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white font-bold py-3 rounded-xl shadow-lg transition disabled:opacity-50 mt-2">
-                      {authLoading ? 'Processing...' : isLoginView ? 'Sign In' : 'Create Account'}
+                    <button type="submit" disabled={authLoading} className="w-full bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white font-bold text-xl py-4 rounded-2xl shadow-lg transition disabled:opacity-50 mt-4 flex justify-center items-center gap-2">
+                      {authLoading ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-right-to-bracket"></i>}
+                      {authLoading ? 'Processing...' : isLoginView ? 'Sign In' : 'Create Secure Account'}
                     </button>
                   </form>
                   
-                  <p className="text-center text-sm text-slate-400 mt-6 cursor-pointer hover:text-cyan-400" onClick={() => setIsLoginView(!isLoginView)}>
-                    {isLoginView ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+                  <p className="text-center text-base text-slate-400 mt-8 cursor-pointer hover:text-cyan-400 transition" onClick={() => setIsLoginView(!isLoginView)}>
+                    {isLoginView ? "Don't have an account? Create one here." : "Already have an account? Sign in here."}
                   </p>
                 </div>
               </div>
             );
           }
 
-          // --- Main App Logic ---
           const currentSubjects = (scheduleData[selectedDate] || initialSchedule)[currentDay] || [];
           const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
           
-          // Calculate 14 Hour Progress (Targeting 14 total hours across both days)
+          // Calculate 14 Hour Progress (Across both days for the selected date)
           const allSubjectsDay1 = (scheduleData[selectedDate] || initialSchedule).day1 || [];
           const allSubjectsDay2 = (scheduleData[selectedDate] || initialSchedule).day2 || [];
           const totalCompletedHours = allSubjectsDay1.reduce((acc, curr) => acc + curr.completed, 0) + 
                                       allSubjectsDay2.reduce((acc, curr) => acc + curr.completed, 0);
           
-          const targetHours = 14; 
-          const isTargetMet = totalCompletedHours >= targetHours;
-          const progressPercent = Math.min(100, (totalCompletedHours / targetHours) * 100);
+          const isTargetMet = totalCompletedHours >= TARGET_DAILY_HOURS;
+          const progressPercent = Math.min(100, (totalCompletedHours / TARGET_DAILY_HOURS) * 100);
 
           return (
-            <div className="max-w-5xl mx-auto space-y-6 p-4 md:p-8">
+            <div className="max-w-6xl mx-auto space-y-8 p-4 md:p-8">
               
-              {/* Header */}
-              <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+              {/* Top Header */}
+              <header className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
                 <div className="relative z-10">
-                  <h1 className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
+                  <h1 className="text-3xl md:text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
                     Med-Study Tracker
                   </h1>
-                  <p className="text-slate-400 text-sm mt-1">Logged in as {user.email}</p>
+                  <p className="text-slate-400 text-base mt-2 flex items-center gap-2">
+                    <i className="fas fa-user-circle text-lg"></i> Logged in as <strong className="text-slate-300">{user.email}</strong>
+                  </p>
                 </div>
 
-                <div className="flex flex-wrap gap-3 items-center relative z-10">
-                  <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); stopTimer(); }} className="bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl p-2.5 outline-none cursor-pointer" />
+                <div className="flex flex-wrap gap-4 items-center relative z-10">
+                  <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); stopTimer(); }} className="bg-slate-950 border border-slate-700 text-slate-200 text-lg rounded-xl px-4 py-3 outline-none cursor-pointer hover:border-cyan-500 transition" />
                   
-                  <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
-                    <button onClick={() => { setCurrentDay('day1'); stopTimer(); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${currentDay === 'day1' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 1</button>
-                    <button onClick={() => { setCurrentDay('day2'); stopTimer(); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${currentDay === 'day2' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 2</button>
+                  <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
+                    <button onClick={() => { setCurrentDay('day1'); stopTimer(); }} className={`px-6 py-3 rounded-xl font-bold text-lg transition-all ${currentDay === 'day1' ? 'bg-slate-800 text-violet-400 shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>Day 1</button>
+                    <button onClick={() => { setCurrentDay('day2'); stopTimer(); }} className={`px-6 py-3 rounded-xl font-bold text-lg transition-all ${currentDay === 'day2' ? 'bg-slate-800 text-violet-400 shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>Day 2</button>
                   </div>
                   
-                  <button onClick={handleLogout} className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-rose-400 transition" title="Log Out">
-                    <i data-lucide="log-out"></i> <LogOut size={18} />
+                  <button onClick={handleLogout} className="px-6 py-3 bg-slate-800 hover:bg-rose-900 hover:text-rose-200 rounded-xl text-rose-400 font-bold text-lg transition border border-transparent hover:border-rose-800 shadow-sm flex items-center gap-2">
+                    <i className="fas fa-arrow-right-from-bracket"></i> Logout
                   </button>
                 </div>
               </header>
 
-              {/* 14-HOUR PROGRESS BAR */}
-              <div className={`bg-slate-900 p-6 rounded-3xl border ${isTargetMet ? 'border-amber-500 gold-glow progress-pulse' : 'border-slate-800'}`}>
-                <div className="flex justify-between items-end mb-2">
+              {/* 14-HOUR GOLD PROGRESS BAR */}
+              <div className={`bg-slate-900 p-8 rounded-3xl border ${isTargetMet ? 'border-amber-500 gold-glow progress-pulse' : 'border-slate-800 shadow-lg'}`}>
+                <div className="flex justify-between items-end mb-4">
                   <div>
-                    <h2 className={`font-extrabold text-lg flex items-center gap-2 ${isTargetMet ? 'text-amber-400' : 'text-slate-200'}`}>
-                      Daily Target: 14 Hours {isTargetMet && '🏆'}
+                    <h2 className={`font-extrabold text-2xl flex items-center gap-3 ${isTargetMet ? 'text-amber-400' : 'text-slate-100'}`}>
+                      Daily Target: 14 Hours {isTargetMet && <i className="fas fa-trophy text-amber-500"></i>}
                     </h2>
-                    <p className="text-xs text-slate-400">Combined completed sessions across Day 1 & Day 2</p>
+                    <p className="text-base text-slate-400 mt-1">Combined sessions across Day 1 & Day 2</p>
                   </div>
-                  <span className={`font-bold text-xl ${isTargetMet ? 'text-amber-400' : 'text-cyan-400'}`}>
-                    {totalCompletedHours} / 14
+                  <span className={`font-black text-3xl ${isTargetMet ? 'text-amber-400' : 'text-cyan-400'}`}>
+                    {totalCompletedHours} <span className="text-xl text-slate-500 font-bold">/ 14</span>
                   </span>
                 </div>
                 
-                <div className="h-4 w-full bg-slate-950 rounded-full overflow-hidden shadow-inner border border-slate-800">
+                <div className="h-6 w-full bg-slate-950 rounded-full overflow-hidden shadow-inner border border-slate-800">
                   <div 
-                    className={`h-full transition-all duration-1000 ease-out ${isTargetMet ? 'bg-gradient-to-r from-amber-400 to-yellow-300' : 'bg-gradient-to-r from-cyan-500 to-violet-500'}`}
+                    className={`h-full transition-all duration-1000 ease-out ${isTargetMet ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500' : 'bg-gradient-to-r from-cyan-500 to-violet-500'}`}
                     style={{ width: `${progressPercent}%` }}
                   ></div>
                 </div>
                 
                 {isTargetMet && (
-                  <p className="text-amber-400 text-center font-bold mt-3 text-sm animate-bounce flex justify-center items-center gap-2">
-                    <Sparkles size={16} /> Incredible! You hit your 14-hour study goal! <Sparkles size={16} />
+                  <p className="text-amber-400 text-center font-bold mt-5 text-lg animate-bounce flex justify-center items-center gap-2">
+                    <i className="fas fa-star"></i> Incredible! You hit your 14-hour study goal! <i className="fas fa-star"></i>
                   </p>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                 
                 {/* Timer Box */}
-                <div className="lg:col-span-5 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-lg relative overflow-hidden h-fit">
-                   <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full blur-3xl opacity-10 pointer-events-none transition-all duration-1000 ${timerMode === 'study' ? 'bg-violet-500' : timerMode === 'break' ? 'bg-cyan-500' : 'bg-transparent'}`}></div>
+                <div className="lg:col-span-5 bg-slate-900 p-8 rounded-3xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-xl relative overflow-hidden min-h-[450px]">
+                   <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full blur-3xl opacity-10 pointer-events-none transition-all duration-1000 ${timerMode === 'study' ? 'bg-violet-500' : timerMode === 'break' ? 'bg-cyan-500' : 'bg-transparent'}`}></div>
 
                   {timerMode === 'idle' ? (
-                    <div className="mb-6 relative z-10">
-                      <h2 className="text-xl font-bold text-slate-300">Ready to Focus?</h2>
-                      <p className="text-sm text-slate-500 mt-1">Select a subject to start 50m.</p>
+                    <div className="mb-8 relative z-10">
+                      <i className="fas fa-book-open text-5xl text-slate-700 mb-4 block"></i>
+                      <h2 className="text-2xl font-bold text-slate-300">Ready to Focus?</h2>
+                      <p className="text-lg text-slate-500 mt-2">Select a subject to start 50m.</p>
                     </div>
                   ) : (
-                    <div className="mb-6 relative z-10">
-                      <span className={`px-4 py-1.5 rounded-full text-xs font-bold border ${timerMode === 'study' ? 'bg-violet-900/40 text-violet-300 border-violet-700/50' : 'bg-cyan-900/40 text-cyan-300 border-cyan-700/50'}`}>
+                    <div className="mb-8 relative z-10">
+                      <span className={`px-5 py-2 rounded-full text-sm font-bold border flex items-center justify-center gap-2 mx-auto w-max ${timerMode === 'study' ? 'bg-violet-900/40 text-violet-300 border-violet-700/50' : 'bg-cyan-900/40 text-cyan-300 border-cyan-700/50'}`}>
+                        {timerMode === 'study' ? <i className="fas fa-brain"></i> : <i className="fas fa-mug-hot"></i>}
                         {timerMode === 'study' ? 'Focus Session' : 'Break Time'}
                       </span>
-                      {timerMode === 'study' && activeSubject && <h3 className="text-2xl font-bold text-slate-100 mt-3">{activeSubject.name}</h3>}
+                      {timerMode === 'study' && activeSubject && <h3 className="text-3xl font-extrabold text-slate-100 mt-4">{activeSubject.name}</h3>}
                     </div>
                   )}
 
-                  <div className={`text-7xl font-black mb-8 relative z-10 tabular-nums tracking-tight ${timerMode === 'idle' ? 'text-slate-700' : timerMode === 'break' ? 'text-cyan-400' : 'text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400'}`}>
+                  <div className={`text-8xl font-black mb-10 relative z-10 tabular-nums tracking-tighter drop-shadow-md ${timerMode === 'idle' ? 'text-slate-700' : timerMode === 'break' ? 'text-cyan-400' : 'text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400'}`}>
                     {timerMode === 'idle' ? '50:00' : formatTime(timeRemaining)}
                   </div>
 
-                  <div className="flex gap-4 relative z-10">
-                    <button onClick={toggleTimer} disabled={timerMode === 'idle'} className={`p-5 rounded-full flex items-center justify-center transition-all ${timerMode === 'idle' ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : isRunning ? 'bg-amber-600 text-white shadow-lg' : 'bg-violet-600 text-white shadow-lg'}`}>
-                      {isRunning ? <Pause size={28} fill="currentColor"/> : <Play size={28} fill="currentColor" className="ml-1"/>}
+                  <div className="flex gap-5 relative z-10">
+                    <button onClick={toggleTimer} disabled={timerMode === 'idle'} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${timerMode === 'idle' ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : isRunning ? 'bg-amber-600 text-white shadow-lg hover:bg-amber-500' : 'bg-violet-600 text-white shadow-lg hover:bg-violet-500'}`}>
+                      {isRunning ? <i className="fas fa-pause text-3xl"></i> : <i className="fas fa-play text-3xl ml-1"></i>}
                     </button>
-                    <button onClick={stopTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-rose-400 transition-colors">
-                      <Square size={20} fill="currentColor"/>
+                    <button onClick={stopTimer} disabled={timerMode === 'idle'} className="w-16 h-16 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-rose-400 transition-colors flex items-center justify-center shadow-md">
+                      <i className="fas fa-square text-xl"></i>
                     </button>
-                    <button onClick={skipTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-cyan-400 transition-colors">
-                      <SkipForward size={20} />
+                    <button onClick={skipTimer} disabled={timerMode === 'idle'} className="w-16 h-16 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-cyan-400 transition-colors flex items-center justify-center shadow-md">
+                      <i className="fas fa-forward-step text-xl"></i>
                     </button>
                   </div>
                 </div>
 
-                {/* Schedule & Subtopics */}
-                <div className="lg:col-span-7 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-4 h-fit">
-                  <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2">
+                {/* Schedule & Subtopics List */}
+                <div className="lg:col-span-7 bg-slate-900 p-8 rounded-3xl border border-slate-800 space-y-5 shadow-xl">
+                  <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3 mb-6">
+                    <i className="fas fa-list-check text-violet-400"></i>
                     {currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}
                   </h2>
                   
@@ -473,43 +493,63 @@
                     const isActive = activeSubjectId === subject.id && timerMode === 'study';
 
                     return (
-                      <div key={subject.id} className={`p-4 md:p-5 rounded-2xl border-2 transition-all ${isActive ? 'border-violet-500 bg-violet-950/20' : isComplete ? 'border-cyan-800/50 bg-cyan-900/10' : 'border-slate-800 bg-slate-950/40'}`}>
-                        <div className="flex items-center justify-between mb-3">
+                      <div key={subject.id} className={`p-6 rounded-2xl border-2 transition-all ${isActive ? 'border-violet-500 bg-violet-950/30 shadow-lg' : isComplete ? 'border-cyan-800/50 bg-cyan-900/10' : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'}`}>
+                        <div className="flex items-center justify-between mb-4">
                           <div>
-                            <h3 className={`font-bold text-lg flex items-center gap-2 ${isActive ? 'text-violet-300' : isComplete ? 'text-cyan-400' : 'text-slate-200'}`}>
-                              {subject.name} {isComplete && <CheckCircle size={16} className="text-cyan-500"/>}
+                            <h3 className={`font-bold text-xl flex items-center gap-2 ${isActive ? 'text-violet-300' : isComplete ? 'text-cyan-400' : 'text-slate-100'}`}>
+                              {subject.name} {isComplete && <i className="fas fa-circle-check text-cyan-500"></i>}
                             </h3>
-                            <p className="text-xs text-slate-400 mt-1">{subject.completed} / {subject.target} sessions completed</p>
+                            <p className="text-sm text-slate-400 mt-1 font-medium">{subject.completed} / {subject.target} sessions completed</p>
                           </div>
-                          <button onClick={() => startStudySession(subject.id)} disabled={isActive} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${isActive ? 'bg-violet-900/30 text-violet-500 cursor-not-allowed' : 'bg-slate-800 text-violet-400 hover:bg-violet-600 hover:text-white'}`}>
-                            {isActive ? 'Running' : 'Start 50m'}
-                          </button>
+                          
+                          {!isComplete ? (
+                            <button onClick={() => startStudySession(subject.id)} disabled={isActive} className={`px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-sm ${isActive ? 'bg-violet-900/40 text-violet-500 cursor-not-allowed' : 'bg-slate-800 text-violet-400 hover:bg-violet-600 hover:text-white hover:shadow-violet-900/50 border border-violet-800/30'}`}>
+                              {isActive ? (
+                                <><i className="fas fa-spinner fa-spin mr-2"></i>Running</>
+                              ) : (
+                                <><i className="fas fa-play mr-2"></i>Start 50m</>
+                              )}
+                            </button>
+                          ) : (
+                            <span className="px-5 py-2.5 rounded-xl text-sm font-bold bg-cyan-900/30 text-cyan-400 border border-cyan-800/50 flex items-center gap-2">
+                              <i className="fas fa-check"></i> Done
+                            </span>
+                          )}
                         </div>
 
-                        <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800 mb-3">
-                          <div className={`h-full ${isComplete ? 'bg-cyan-500' : 'bg-violet-500'}`} style={{ width: `${Math.min(100, (subject.completed / subject.target) * 100)}%` }}></div>
+                        {/* Mini progress bar for subject */}
+                        <div className="h-2.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800 mb-5">
+                          <div className={`h-full transition-all duration-700 ${isComplete ? 'bg-cyan-500' : 'bg-violet-500'}`} style={{ width: `${Math.min(100, (subject.completed / subject.target) * 100)}%` }}></div>
                         </div>
 
-                        {/* Subtopics Checklist */}
-                        <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                        {/* Subtopics Checklist Section */}
+                        <div className="pt-4 border-t border-slate-800/80 space-y-3">
+                          <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Subtopics Checklist</p>
+                          
                           {subject.subtopics && subject.subtopics.map(sub => (
-                            <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 group">
-                              <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-sm cursor-pointer flex-grow ${sub.completed ? 'line-through text-slate-500' : 'text-slate-300'}`}>
+                            <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-4 py-3 rounded-xl border border-slate-700/60 group hover:border-slate-600 transition-colors">
+                              <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-base cursor-pointer flex-grow flex items-center gap-3 select-none ${sub.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                                <i className={`fas ${sub.completed ? 'fa-square-check text-cyan-400 text-lg' : 'fa-square text-slate-600 text-lg'}`}></i>
                                 {sub.name}
                               </span>
-                              <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                              <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-slate-500 hover:text-rose-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete Subtopic">
+                                <i className="fas fa-trash-can"></i>
+                              </button>
                             </div>
                           ))}
-                          <div className="flex gap-2 mt-2">
+                          
+                          <div className="flex gap-3 mt-3">
                             <input 
                               type="text" 
                               value={newSubtopicText[subject.id] || ''}
                               onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
                               onKeyDown={(e) => { if(e.key === 'Enter') addSubtopic(subject.id); }}
-                              placeholder="Add subtopic..."
-                              className="bg-slate-950 border border-slate-800 text-xs text-slate-200 rounded-xl px-3 py-2 flex-grow outline-none focus:border-cyan-500"
+                              placeholder="Add a new subtopic..."
+                              className="bg-slate-950 border border-slate-800 text-base text-slate-200 rounded-xl px-4 py-3 flex-grow outline-none focus:border-cyan-500 shadow-inner transition"
                             />
-                            <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition-colors text-slate-200">Add</button>
+                            <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl text-base font-bold transition-colors text-slate-200 border border-slate-700/50 flex items-center gap-2 shadow-sm">
+                              <i className="fas fa-plus"></i> Add
+                            </button>
                           </div>
                         </div>
                       </div>
@@ -522,7 +562,6 @@
           );
         }
 
-        // Wait for React to load, then render
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
