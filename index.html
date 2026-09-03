@@ -24,7 +24,7 @@
         
         // --- CONFIGURE YOUR SUPABASE HERE ---
         const SUPABASE_URL = 'https://lkltuvpdrebexvoekywb.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreWdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
         
         const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -44,6 +44,39 @@
             { id: 'f1', name: 'Forensic', target: 4, completed: 0, subtopics: [] },
             { id: 'p2', name: 'Psychiatry', target: 2, completed: 0, subtopics: [] },
           ]
+        };
+
+        // --- AUDIO NOTIFICATION HELPER ---
+        const playChime = (type) => {
+          try {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            if (type === 'study_complete') {
+              // Upbeat dual tone when study session finishes & break starts
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+              osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+              gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+              osc.start();
+              osc.stop(audioCtx.currentTime + 0.6);
+            } else if (type === 'break_complete') {
+              // Gentle warning tone when break finishes
+              osc.type = 'triangle';
+              osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
+              osc.frequency.setValueAtTime(330, audioCtx.currentTime + 0.2); // E4
+              gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+              gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+              osc.start();
+              osc.stop(audioCtx.currentTime + 0.6);
+            }
+          } catch (e) {
+            console.log("Audio not supported or blocked", e);
+          }
         };
 
         function App() {
@@ -149,6 +182,7 @@
 
           const handleTimerComplete = () => {
             if (timerMode === 'study') {
+              playChime('study_complete'); // Play chime when study session finishes & break starts
               if (activeSubjectId) {
                 const currentSchedule = scheduleData[selectedDate] || initialSchedule;
                 const updatedDay = currentSchedule[currentDay].map(subject => 
@@ -161,6 +195,7 @@
               setTimeRemaining(BREAK_DURATION);
               setIsRunning(true);
             } else if (timerMode === 'break') {
+              playChime('break_complete'); // Play chime when break finishes
               setTimerMode('idle');
               setActiveSubjectId(null);
               setIsRunning(false);
