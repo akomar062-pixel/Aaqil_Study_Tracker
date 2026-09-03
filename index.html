@@ -15,26 +15,32 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Supabase JS -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        .gold-glow { box-shadow: 0 0 20px rgba(251, 191, 36, 0.6); }
+        .progress-pulse { animation: pulse-gold 2s infinite; }
+        @keyframes pulse-gold {
+            0% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
+            50% { box-shadow: 0 0 25px rgba(251, 191, 36, 0.8); }
+            100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
+        }
+    </style>
 </head>
-<body class="bg-slate-950 text-slate-200 min-h-screen">
+<body class="bg-slate-950 text-slate-200 min-h-screen font-sans">
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect } = React;
+        const { Play, Pause, Square, CheckCircle, SkipForward, Coffee, LogOut, Sparkles } = window.lucide;
         
         // --- CONFIGURE YOUR SUPABASE HERE ---
         const SUPABASE_URL = 'https://lkltuvpdrebexvoekywb.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
         
-        const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-          auth: {
-            persistSession: true,
-            autoRefreshToken: true,
-          }
-        }) : null;
+        const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-        const STUDY_DURATION = 50 * 60;
-        const BREAK_DURATION = 10 * 60;
+        const STUDY_DURATION = 50 * 60; // 50 mins
+        const BREAK_DURATION = 10 * 60; // 10 mins
 
         const initialSchedule = {
           day1: [
@@ -51,155 +57,175 @@
           ]
         };
 
-        // --- AUDIO NOTIFICATION HELPER ---
-        const playChime = (type) => {
+        // --- Audio Notification Function ---
+        const playBeep = (type) => {
           try {
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-
-            if (type === 'study_complete') {
-              osc.type = 'sine';
-              osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
-              osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.15); // A5
-              gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-              gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
-              osc.start();
-              osc.stop(audioCtx.currentTime + 0.6);
-            } else if (type === 'break_complete') {
-              osc.type = 'triangle';
-              osc.frequency.setValueAtTime(440, audioCtx.currentTime); // A4
-              osc.frequency.setValueAtTime(330, audioCtx.currentTime + 0.2); // E4
-              gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
-              gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
-              osc.start();
-              osc.stop(audioCtx.currentTime + 0.6);
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gainNode = ctx.createGain();
+            osc.connect(gainNode);
+            gainNode.connect(ctx.destination);
+            
+            if (type === 'study-end') {
+              osc.type = 'sine'; // Smooth tone for break time
+              osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+              osc.frequency.setValueAtTime(659.25, ctx.currentTime + 0.2); // E5
+            } else {
+              osc.type = 'triangle'; // Sharp tone for get back to work
+              osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+              osc.frequency.setValueAtTime(440, ctx.currentTime + 0.2); // A4
             }
-          } catch (e) {
-            console.log("Audio not supported or blocked", e);
+            
+            gainNode.gain.setValueAtTime(0.5, ctx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+            osc.start(ctx.currentTime);
+            osc.stop(ctx.currentTime + 0.8);
+          } catch (err) {
+            console.log("Audio blocked by browser", err);
           }
         };
 
         function App() {
+          // Auth State
           const [user, setUser] = useState(null);
           const [authEmail, setAuthEmail] = useState('');
           const [authPassword, setAuthPassword] = useState('');
-          const [rememberMe, setRememberMe] = useState(true);
-          const [isSignUp, setIsSignUp] = useState(false);
+          const [isLoginView, setIsLoginView] = useState(true);
           const [authError, setAuthError] = useState('');
+          const [authLoading, setAuthLoading] = useState(false);
+          const [rememberMe, setRememberMe] = useState(true);
 
+          // Tracker State
           const getTodayString = () => new Date().toISOString().split('T')[0];
           const [selectedDate, setSelectedDate] = useState(getTodayString());
           const [currentDay, setCurrentDay] = useState('day1');
-          const [activeTab, setActiveTab] = useState('tracker');
           const [scheduleData, setScheduleData] = useState({});
           
           const [newSubtopicText, setNewSubtopicText] = useState({});
-          const [editingSubtopicId, setEditingSubtopicId] = useState(null);
-          const [editSubtopicText, setEditSubtopicText] = useState('');
+          
+          const [timerMode, setTimerMode] = useState('idle');
+          const [timeRemaining, setTimeRemaining] = useState(0);
+          const [isRunning, setIsRunning] = useState(false);
+          const [activeSubjectId, setActiveSubjectId] = useState(null);
 
-          // AI Chat State
-          const [chatMessages, setChatMessages] = useState([
-            { role: 'model', text: 'Hello! I am your AI Medical Study Coach powered by Gemini. Ask me for study tips, quick summaries, or motivation for your 50/10 sessions!' }
-          ]);
-          const [userInput, setUserInput] = useState('');
-          const [isAiLoading, setIsAiLoading] = useState(false);
-
-          // Check active session on load & handle persistence
+          // --- Authentication Check ---
           useEffect(() => {
             if (!supabase) return;
-            
             supabase.auth.getSession().then(({ data: { session } }) => {
               setUser(session?.user ?? null);
             });
-
             const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
               setUser(session?.user ?? null);
             });
-
             return () => subscription.unsubscribe();
           }, []);
 
-          // Fetch from Supabase on date change or login with smart merge so user data is never lost
+          const handleAuth = async (e) => {
+            e.preventDefault();
+            setAuthLoading(true);
+            setAuthError('');
+            
+            try {
+              if (isLoginView) {
+                const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+                if (error) throw error;
+              } else {
+                const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
+                if (error) throw error;
+                alert("Account created! You are now logged in.");
+              }
+            } catch (err) {
+              setAuthError(err.message);
+            } finally {
+              setAuthLoading(false);
+            }
+          };
+
+          const handleLogout = async () => {
+            if (window.confirm("Are you sure you want to log out?")) {
+              await supabase.auth.signOut();
+            }
+          };
+
+          // --- Bulletproof Data Fetching & Smart Merging ---
           useEffect(() => {
             async function fetchData() {
               if (!supabase || !user) return;
-              const { data } = await supabase
-                .from('study_records')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('date_key', selectedDate)
-                .single();
               
-              if (data && data.data) {
-                // Merge saved user data with initialSchedule template to preserve completed hours & subtopics
-                const savedDay1 = data.data.day1 || initialSchedule.day1;
-                const savedDay2 = data.data.day2 || initialSchedule.day2;
+              try {
+                // Use .select() instead of .single() to avoid 406 Not Found errors on empty days
+                const { data, error } = await supabase
+                  .from('study_records')
+                  .select('data')
+                  .eq('user_id', user.id)
+                  .eq('date_key', selectedDate);
                 
-                const mergedDay1 = initialSchedule.day1.map(defaultSub => {
-                  const found = savedDay1.find(s => s.id === defaultSub.id);
-                  return found ? { ...defaultSub, ...found } : defaultSub;
-                });
-                const mergedDay2 = initialSchedule.day2.map(defaultSub => {
-                  const found = savedDay2.find(s => s.id === defaultSub.id);
-                  return found ? { ...defaultSub, ...found } : defaultSub;
-                });
+                if (error) throw error;
 
-                setScheduleData(prev => ({ 
-                  ...prev, 
-                  [selectedDate]: { day1: mergedDay1, day2: mergedDay2 } 
-                }));
-              } else {
-                setScheduleData(prev => ({ ...prev, [selectedDate]: initialSchedule }));
+                if (data && data.length > 0) {
+                  const savedData = data[0].data;
+                  
+                  // SMART MERGE: Keep saved checkmarks and hours, but pull in new template structure
+                  const mergeDay = (savedDay, initialDay) => {
+                    return initialDay.map(initialSubj => {
+                      const savedSubj = (savedDay || []).find(s => s.id === initialSubj.id);
+                      if (savedSubj) {
+                        return { ...initialSubj, completed: savedSubj.completed, subtopics: savedSubj.subtopics || [] };
+                      }
+                      return initialSubj;
+                    });
+                  };
+
+                  const mergedData = {
+                    day1: mergeDay(savedData.day1, initialSchedule.day1),
+                    day2: mergeDay(savedData.day2, initialSchedule.day2)
+                  };
+
+                  setScheduleData(prev => ({ ...prev, [selectedDate]: mergedData }));
+                } else {
+                  // No data found for this date, load fresh template
+                  setScheduleData(prev => ({ ...prev, [selectedDate]: initialSchedule }));
+                }
+              } catch (err) {
+                console.error("Error fetching data:", err);
               }
             }
             fetchData();
           }, [selectedDate, user]);
 
-          const handleAuth = async (e) => {
-            e.preventDefault();
-            setAuthError('');
-            if (!supabase) return;
+          // --- Bulletproof Data Saving ---
+          const saveToSupabase = async (newDateData) => {
+            // Update UI instantly
+            setScheduleData(prev => ({ ...prev, [selectedDate]: newDateData }));
             
-            if (isSignUp) {
-              const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-              if (error) setAuthError(error.message);
-              else alert('Signup successful! You can now log in.');
-            } else {
-              const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-              if (error) setAuthError(error.message);
+            if (!supabase || !user) return;
+            
+            try {
+              // 1. Check if row exists
+              const { data: existing } = await supabase
+                .from('study_records')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('date_key', selectedDate);
+
+              if (existing && existing.length > 0) {
+                // 2a. Update existing row
+                await supabase
+                  .from('study_records')
+                  .update({ data: newDateData })
+                  .eq('id', existing[0].id);
+              } else {
+                // 2b. Insert new row
+                await supabase
+                  .from('study_records')
+                  .insert([{ user_id: user.id, date_key: selectedDate, data: newDateData }]);
+              }
+            } catch (err) {
+              console.error("Error saving data:", err);
             }
           };
 
-          const handleLogout = async () => {
-            if (supabase) await supabase.auth.signOut();
-          };
-
-          const schedule = scheduleData[selectedDate] || initialSchedule;
-          const activeSubjectId = scheduleData[`${selectedDate}_activeSubject`] || null;
-
-          const setActiveSubjectId = (id) => {
-            const updated = { ...scheduleData, [`${selectedDate}_activeSubject`]: id };
-            saveToSupabase(updated);
-          };
-
-          const [timerMode, setTimerMode] = useState('idle');
-          const [timeRemaining, setTimeRemaining] = useState(0);
-          const [isRunning, setIsRunning] = useState(false);
-
-          const saveToSupabase = async (newFullState) => {
-            setScheduleData(newFullState);
-            if (!supabase || !user) return;
-            const currentDayData = newFullState[selectedDate] || initialSchedule;
-            
-            await supabase
-              .from('study_records')
-              .upsert({ user_id: user.id, date_key: selectedDate, data: currentDayData }, { onConflict: 'user_id,date_key' });
-          };
-
-          // Timer Countdown Logic
+          // --- Timer Logic ---
           useEffect(() => {
             let interval = null;
             if (isRunning && timeRemaining > 0) {
@@ -212,20 +238,20 @@
 
           const handleTimerComplete = () => {
             if (timerMode === 'study') {
-              playChime('study_complete');
+              playBeep('study-end'); // Play Chime
               if (activeSubjectId) {
                 const currentSchedule = scheduleData[selectedDate] || initialSchedule;
                 const updatedDay = currentSchedule[currentDay].map(subject => 
                   subject.id === activeSubjectId ? { ...subject, completed: subject.completed + 1 } : subject
                 );
-                const newFull = { ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } };
-                saveToSupabase(newFull);
+                saveToSupabase({ ...currentSchedule, [currentDay]: updatedDay });
               }
               setTimerMode('break');
               setTimeRemaining(BREAK_DURATION);
               setIsRunning(true);
+              
             } else if (timerMode === 'break') {
-              playChime('break_complete');
+              playBeep('break-end'); // Play Chime
               setTimerMode('idle');
               setActiveSubjectId(null);
               setIsRunning(false);
@@ -243,18 +269,7 @@
           const stopTimer = () => { setIsRunning(false); setTimerMode('idle'); setActiveSubjectId(null); setTimeRemaining(0); };
           const skipTimer = () => setTimeRemaining(0);
 
-          const updateCompletedHours = (subjectId, delta) => {
-            const currentSchedule = scheduleData[selectedDate] || initialSchedule;
-            const updatedDay = currentSchedule[currentDay].map(subject => {
-              if (subject.id === subjectId) {
-                return { ...subject, completed: Math.max(0, subject.completed + delta) };
-              }
-              return subject;
-            });
-            const newFull = { ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } };
-            saveToSupabase(newFull);
-          };
-
+          // --- Subtopics Logic ---
           const addSubtopic = (subjectId) => {
             const text = (newSubtopicText[subjectId] || '').trim();
             if (!text) return;
@@ -266,7 +281,7 @@
               }
               return subject;
             });
-            saveToSupabase({ ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } });
+            saveToSupabase({ ...currentSchedule, [currentDay]: updatedDay });
             setNewSubtopicText({ ...newSubtopicText, [subjectId]: '' });
           };
 
@@ -281,7 +296,7 @@
               }
               return subject;
             });
-            saveToSupabase({ ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } });
+            saveToSupabase({ ...currentSchedule, [currentDay]: updatedDay });
           };
 
           const deleteSubtopic = (subjectId, subtopicId) => {
@@ -293,7 +308,7 @@
               }
               return subject;
             });
-            saveToSupabase({ ...scheduleData, [selectedDate]: { ...currentSchedule, [currentDay]: updatedDay } });
+            saveToSupabase({ ...currentSchedule, [currentDay]: updatedDay });
           };
 
           const formatTime = (seconds) => {
@@ -302,300 +317,214 @@
             return `${m}:${s}`;
           };
 
-          // Call Gemini API for AI Study Coach
-          const handleSendMessage = async (e) => {
-            e.preventDefault();
-            if (!userInput.trim() || isAiLoading) return;
-
-            const question = userInput.trim();
-            setUserInput('');
-            setChatMessages(prev => [...prev, { role: 'user', text: question }]);
-            setIsAiLoading(true);
-
-            try {
-              const systemPrompt = "You are an encouraging and knowledgeable medical study coach helping a student preparing for board exams or medical school rotations. Give concise, highly educational, and motivating advice tailored to subjects like Medicine, Surgery, Pediatrics, and Gyn & Obs.";
-              const apiKey = "";
-              const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${apiKey}`;
-
-              const payload = {
-                contents: [{ role: 'user', parts: [{ text: `Context: The student is following a strict study schedule including Medicine, Surgery, Commed, Psychiatry, Pediatrics, Gyn & Obs, and Forensic Medicine in 50-minute blocks.\n\nStudent question: ${question}` }] }],
-                systemInstruction: { parts: [{ text: systemPrompt }] }
-              };
-
-              const response = await fetch(apiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-              });
-
-              const result = await response.json();
-              const candidate = result.candidates?.[0];
-
-              if (candidate && candidate.content?.parts?.[0]?.text) {
-                setChatMessages(prev => [...prev, { role: 'model', text: candidate.content.parts[0].text }]);
-              } else {
-                setChatMessages(prev => [...prev, { role: 'model', text: "Sorry, I couldn't process that right now. Keep up the great study grind!" }]);
-              }
-            } catch (err) {
-              setChatMessages(prev => [...prev, { role: 'model', text: "Network error connecting to the AI Coach. Please try again." }]);
-            } finally {
-              setIsAiLoading(false);
-            }
-          };
-
-          // If not logged in, show login card with Remember Me
+          // --- Render Auth View ---
           if (!user) {
             return (
-              <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-                <div className="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full shadow-2xl space-y-6">
-                  <div>
-                    <h1 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-violet-400">
-                      Med-Study Tracker 🚀
-                    </h1>
-                    <p className="text-slate-400 text-sm mt-1">Log in to access your cloud study data</p>
-                  </div>
-
-                  {authError && <div className="p-3 bg-rose-950/50 border border-rose-800 text-rose-300 text-xs rounded-xl">{authError}</div>}
-
+              <div className="min-h-screen flex items-center justify-center p-4">
+                <div className="bg-slate-900 p-8 rounded-3xl border border-slate-800 shadow-xl w-full max-w-md">
+                  <h1 className="text-3xl font-extrabold text-cyan-400 mb-2 flex items-center gap-2">
+                    Med-Study <span className="text-violet-400">Tracker</span> 🚀
+                  </h1>
+                  <p className="text-slate-400 mb-6">Log in to sync your study data to the cloud.</p>
+                  
+                  {authError && <div className="bg-rose-900/30 text-rose-400 p-3 rounded-lg mb-4 text-sm border border-rose-800/50">{authError}</div>}
+                  
                   <form onSubmit={handleAuth} className="space-y-4">
                     <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase">Email</label>
-                      <input 
-                        type="email" 
-                        required
-                        value={authEmail} 
-                        onChange={(e) => setAuthEmail(e.target.value)} 
-                        className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 outline-none focus:border-cyan-500"
-                        placeholder="friend@email.com"
-                      />
+                      <label className="block text-xs font-bold text-slate-400 mb-1">EMAIL</label>
+                      <input type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 outline-none focus:border-cyan-500 transition" />
                     </div>
                     <div>
-                      <label className="text-xs font-bold text-slate-400 uppercase">Password</label>
-                      <input 
-                        type="password" 
-                        required
-                        value={authPassword} 
-                        onChange={(e) => setAuthPassword(e.target.value)} 
-                        className="w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 outline-none focus:border-cyan-500"
-                        placeholder="••••••••"
-                      />
+                      <label className="block text-xs font-bold text-slate-400 mb-1">PASSWORD</label>
+                      <input type="password" required value={authPassword} onChange={e => setAuthPassword(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-slate-200 outline-none focus:border-cyan-500 transition" />
                     </div>
                     
-                    <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input 
-                          type="checkbox" 
-                          checked={rememberMe} 
-                          onChange={(e) => setRememberMe(e.target.checked)}
-                          className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-cyan-500 focus:ring-cyan-500 cursor-pointer"
-                        />
-                        Remember Me
-                      </label>
+                    <div className="flex items-center gap-2 mt-2">
+                      <input type="checkbox" id="remember" checked={rememberMe} onChange={() => setRememberMe(!rememberMe)} className="w-4 h-4 accent-cyan-500 cursor-pointer" />
+                      <label htmlFor="remember" className="text-sm text-slate-400 cursor-pointer">Remember me</label>
                     </div>
 
-                    <button type="submit" className="w-full py-3 bg-gradient-to-r from-cyan-500 to-violet-600 rounded-xl font-bold text-white shadow-lg hover:opacity-95 transition-opacity">
-                      {isSignUp ? 'Create Account' : 'Log In'}
+                    <button type="submit" disabled={authLoading} className="w-full bg-gradient-to-r from-cyan-600 to-violet-600 hover:from-cyan-500 hover:to-violet-500 text-white font-bold py-3 rounded-xl shadow-lg transition disabled:opacity-50 mt-2">
+                      {authLoading ? 'Processing...' : isLoginView ? 'Sign In' : 'Create Account'}
                     </button>
                   </form>
-
-                  <div className="text-center">
-                    <button onClick={() => setIsSignUp(!isSignUp)} className="text-xs text-cyan-400 hover:underline">
-                      {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
-                    </button>
-                  </div>
+                  
+                  <p className="text-center text-sm text-slate-400 mt-6 cursor-pointer hover:text-cyan-400" onClick={() => setIsLoginView(!isLoginView)}>
+                    {isLoginView ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
+                  </p>
                 </div>
               </div>
             );
           }
 
-          const currentSubjects = schedule[currentDay] || initialSchedule[currentDay];
+          // --- Main App Logic ---
+          const currentSubjects = (scheduleData[selectedDate] || initialSchedule)[currentDay] || [];
           const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
-          const day1Subjects = schedule.day1 || initialSchedule.day1;
-          const day2Subjects = schedule.day2 || initialSchedule.day2;
-          const day1Completed = day1Subjects.reduce((acc, curr) => acc + curr.completed, 0);
-          const day2Completed = day2Subjects.reduce((acc, curr) => acc + curr.completed, 0);
-          const totalCompleted = day1Completed + day2Completed;
-          const totalTarget = 14;
-          const isDayCompleted = totalCompleted >= totalTarget;
-          const recordedDates = Object.keys(scheduleData).filter(k => !k.includes('_activeSubject'));
+          
+          // Calculate 14 Hour Progress (Targeting 14 total hours across both days)
+          const allSubjectsDay1 = (scheduleData[selectedDate] || initialSchedule).day1 || [];
+          const allSubjectsDay2 = (scheduleData[selectedDate] || initialSchedule).day2 || [];
+          const totalCompletedHours = allSubjectsDay1.reduce((acc, curr) => acc + curr.completed, 0) + 
+                                      allSubjectsDay2.reduce((acc, curr) => acc + curr.completed, 0);
+          
+          const targetHours = 14; 
+          const isTargetMet = totalCompletedHours >= targetHours;
+          const progressPercent = Math.min(100, (totalCompletedHours / targetHours) * 100);
 
           return (
-            <div className="min-h-screen bg-slate-950 text-slate-200 p-4 md:p-8 font-sans">
-              <div className="max-w-5xl mx-auto space-y-6">
-                
-                {/* Header */}
-                <header className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl">
+            <div className="max-w-5xl mx-auto space-y-6 p-4 md:p-8">
+              
+              {/* Header */}
+              <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
+                <div className="relative z-10">
+                  <h1 className="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
+                    Med-Study Tracker
+                  </h1>
+                  <p className="text-slate-400 text-sm mt-1">Logged in as {user.email}</p>
+                </div>
+
+                <div className="flex flex-wrap gap-3 items-center relative z-10">
+                  <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); stopTimer(); }} className="bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl p-2.5 outline-none cursor-pointer" />
+                  
+                  <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
+                    <button onClick={() => { setCurrentDay('day1'); stopTimer(); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${currentDay === 'day1' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 1</button>
+                    <button onClick={() => { setCurrentDay('day2'); stopTimer(); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${currentDay === 'day2' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 2</button>
+                  </div>
+                  
+                  <button onClick={handleLogout} className="p-2.5 bg-slate-800 hover:bg-slate-700 rounded-xl text-rose-400 transition" title="Log Out">
+                    <i data-lucide="log-out"></i> <LogOut size={18} />
+                  </button>
+                </div>
+              </header>
+
+              {/* 14-HOUR PROGRESS BAR */}
+              <div className={`bg-slate-900 p-6 rounded-3xl border ${isTargetMet ? 'border-amber-500 gold-glow progress-pulse' : 'border-slate-800'}`}>
+                <div className="flex justify-between items-end mb-2">
                   <div>
-                    <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400">
-                      Med-Study Tracker 🚀
-                    </h1>
-                    <p className="text-slate-400 text-sm mt-1">Logged in as: <span className="text-cyan-400 font-semibold">{user.email}</span></p>
+                    <h2 className={`font-extrabold text-lg flex items-center gap-2 ${isTargetMet ? 'text-amber-400' : 'text-slate-200'}`}>
+                      Daily Target: 14 Hours {isTargetMet && '🏆'}
+                    </h2>
+                    <p className="text-xs text-slate-400">Combined completed sessions across Day 1 & Day 2</p>
                   </div>
-
-                  <div className="flex flex-wrap gap-3 items-center">
-                    <button onClick={handleLogout} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs font-bold rounded-xl border border-slate-700">
-                      Log Out
-                    </button>
-
-                    <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
-                      <button onClick={() => setActiveTab('tracker')} className={`px-4 py-2 rounded-xl text-sm font-bold ${activeTab === 'tracker' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 'text-slate-400'}`}>Timer</button>
-                      <button onClick={() => setActiveTab('coach')} className={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-1.5 ${activeTab === 'coach' ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30' : 'text-slate-400'}`}>AI Coach</button>
-                    </div>
-
-                    {activeTab === 'tracker' && (
-                      <>
-                        <input 
-                          type="date" 
-                          value={selectedDate} 
-                          onChange={(e) => setSelectedDate(e.target.value)}
-                          className="bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl p-2.5 outline-none cursor-pointer"
-                        />
-                        <div className="flex bg-slate-950 p-1 rounded-2xl border border-slate-800">
-                          <button onClick={() => setCurrentDay('day1')} className={`px-4 py-2 rounded-xl font-bold text-sm ${currentDay === 'day1' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 1</button>
-                          <button onClick={() => setCurrentDay('day2')} className={`px-4 py-2 rounded-xl font-bold text-sm ${currentDay === 'day2' ? 'bg-slate-800 text-violet-400' : 'text-slate-500'}`}>Day 2</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </header>
-
-                {activeTab === 'coach' ? (
-                  <div className="bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 flex flex-col h-[550px]">
-                    <h2 className="text-xl font-bold text-slate-100 mb-4">Gemini Medical AI Coach</h2>
-                    <div className="flex-grow overflow-y-auto space-y-4 py-2 pr-2">
-                      {chatMessages.map((msg, idx) => (
-                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-violet-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700'}`}>
-                            {msg.text}
-                          </div>
-                        </div>
-                      ))}
-                      {isAiLoading && <div className="text-slate-400 text-sm animate-pulse">Coach is thinking...</div>}
-                    </div>
-                    <form onSubmit={handleSendMessage} className="pt-4 border-t border-slate-800 flex gap-3">
-                      <input 
-                        type="text"
-                        value={userInput}
-                        onChange={(e) => setUserInput(e.target.value)}
-                        placeholder="Ask for high-yield notes or study tips..."
-                        className="bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-2xl px-4 py-3 flex-grow outline-none focus:border-violet-500"
-                      />
-                      <button type="submit" disabled={isAiLoading || !userInput.trim()} className="bg-violet-600 text-white px-6 py-3 rounded-2xl font-bold">Send</button>
-                    </form>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Timer */}
-                    <div className="lg:col-span-5 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 flex flex-col items-center justify-center text-center">
-                      {timerMode === 'idle' ? (
-                        <div className="mb-6 text-slate-500">
-                          <h2 className="text-xl font-bold text-slate-300">Ready to Focus?</h2>
-                          <p className="text-sm mt-1">Select a subject to start 50m.</p>
-                        </div>
-                      ) : (
-                        <div className="mb-6">
-                          <span className={`px-4 py-1.5 rounded-full text-xs font-bold border ${timerMode === 'study' ? 'bg-violet-900/40 text-violet-300 border-violet-700' : 'bg-cyan-900/40 text-cyan-300 border-cyan-700'}`}>
-                            {timerMode === 'study' ? 'Focus Session' : 'Break Time'}
-                          </span>
-                          {timerMode === 'study' && activeSubject && <h3 className="text-xl font-bold text-slate-100 mt-2">{activeSubject.name}</h3>}
-                        </div>
-                      )}
-
-                      <div className="text-7xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400">
-                        {timerMode === 'idle' ? '50:00' : formatTime(timeRemaining)}
-                      </div>
-
-                      <div className="flex gap-4">
-                        <button onClick={toggleTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-violet-600 text-white disabled:opacity-30">
-                          {isRunning ? 'Pause' : 'Play'}
-                        </button>
-                        <button onClick={stopTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30">Stop</button>
-                        <button onClick={skipTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30">Skip</button>
-                      </div>
-                    </div>
-
-                    {/* Schedule & Progress & Subtopics */}
-                    <div className="lg:col-span-7 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-4">
-                      <h2 className="text-xl font-bold text-slate-100">{currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}</h2>
-                      
-                      {currentSubjects.map(subject => {
-                        const isComplete = subject.completed >= subject.target;
-                        const isActive = activeSubjectId === subject.id && timerMode === 'study';
-
-                        return (
-                          <div key={subject.id} className={`p-4 rounded-2xl border ${isActive ? 'border-violet-500 bg-violet-950/20' : 'border-slate-800 bg-slate-950/40'}`}>
-                            <div className="flex items-center justify-between mb-2">
-                              <div>
-                                <h3 className="font-bold text-slate-200">{subject.name}</h3>
-                                <p className="text-xs text-slate-400">{subject.completed} / {subject.target} sessions</p>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <div className="flex bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
-                                  <button onClick={() => updateCompletedHours(subject.id, -1)} className="px-2 py-1 text-slate-400 hover:bg-slate-800">-</button>
-                                  <span className="px-2 py-1 text-xs">{subject.completed}h</span>
-                                  <button onClick={() => updateCompletedHours(subject.id, 1)} className="px-2 py-1 text-slate-400 hover:bg-slate-800">+</button>
-                                </div>
-                                <button onClick={() => startStudySession(subject.id)} className="px-4 py-2 bg-slate-800 text-violet-400 rounded-xl text-xs font-bold hover:bg-slate-700">
-                                  {isActive ? 'Running' : 'Start 50m'}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Subtopics Checklist */}
-                            <div className="mt-3 pt-3 border-t border-slate-800/80 space-y-2">
-                              <p className="text-xs font-bold text-slate-400 uppercase">Subtopics</p>
-                              {subject.subtopics && subject.subtopics.map(sub => (
-                                <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800">
-                                  <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-xs cursor-pointer ${sub.completed ? 'line-through text-slate-500' : 'text-slate-300'}`}>
-                                    {sub.name}
-                                  </span>
-                                  <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-rose-400 text-xs">×</button>
-                                </div>
-                              ))}
-                              <div className="flex gap-2 mt-2">
-                                <input 
-                                  type="text" 
-                                  value={newSubtopicText[subject.id] || ''}
-                                  onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
-                                  placeholder="Add subtopic..."
-                                  className="bg-slate-900 border border-slate-800 text-xs text-slate-200 rounded-xl px-3 py-1.5 flex-grow outline-none"
-                                />
-                                <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold">Add</button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {/* 14-Hour Progress Bar */}
-                      <div className="mt-6 pt-4 border-t border-slate-800">
-                        <div className="flex justify-between text-xs font-bold text-slate-400 mb-2">
-                          <span>Total Daily Target</span>
-                          <span className={isDayCompleted ? 'text-amber-400 font-extrabold' : 'text-slate-200'}>{totalCompleted} / 14 hrs</span>
-                        </div>
-                        <div className="h-3 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800 relative">
-                          <div 
-                            className={`h-full transition-all duration-700 ${isDayCompleted ? 'bg-gradient-to-r from-amber-400 to-yellow-500 animate-pulse' : 'bg-gradient-to-r from-violet-500 to-fuchsia-500'}`}
-                            style={{ width: `${Math.min(100, (totalCompleted / 14) * 100)}%` }}
-                          ></div>
-                        </div>
-                        {isDayCompleted && (
-                          <p className="text-center text-amber-400 font-bold text-xs mt-2 animate-bounce">
-                            🎉 14-Hour Daily Goal Achieved! Great job! 🎉
-                          </p>
-                        )}
-                      </div>
-
-                    </div>
-                  </div>
+                  <span className={`font-bold text-xl ${isTargetMet ? 'text-amber-400' : 'text-cyan-400'}`}>
+                    {totalCompletedHours} / 14
+                  </span>
+                </div>
+                
+                <div className="h-4 w-full bg-slate-950 rounded-full overflow-hidden shadow-inner border border-slate-800">
+                  <div 
+                    className={`h-full transition-all duration-1000 ease-out ${isTargetMet ? 'bg-gradient-to-r from-amber-400 to-yellow-300' : 'bg-gradient-to-r from-cyan-500 to-violet-500'}`}
+                    style={{ width: `${progressPercent}%` }}
+                  ></div>
+                </div>
+                
+                {isTargetMet && (
+                  <p className="text-amber-400 text-center font-bold mt-3 text-sm animate-bounce flex justify-center items-center gap-2">
+                    <Sparkles size={16} /> Incredible! You hit your 14-hour study goal! <Sparkles size={16} />
+                  </p>
                 )}
-
               </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                
+                {/* Timer Box */}
+                <div className="lg:col-span-5 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-lg relative overflow-hidden h-fit">
+                   <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 rounded-full blur-3xl opacity-10 pointer-events-none transition-all duration-1000 ${timerMode === 'study' ? 'bg-violet-500' : timerMode === 'break' ? 'bg-cyan-500' : 'bg-transparent'}`}></div>
+
+                  {timerMode === 'idle' ? (
+                    <div className="mb-6 relative z-10">
+                      <h2 className="text-xl font-bold text-slate-300">Ready to Focus?</h2>
+                      <p className="text-sm text-slate-500 mt-1">Select a subject to start 50m.</p>
+                    </div>
+                  ) : (
+                    <div className="mb-6 relative z-10">
+                      <span className={`px-4 py-1.5 rounded-full text-xs font-bold border ${timerMode === 'study' ? 'bg-violet-900/40 text-violet-300 border-violet-700/50' : 'bg-cyan-900/40 text-cyan-300 border-cyan-700/50'}`}>
+                        {timerMode === 'study' ? 'Focus Session' : 'Break Time'}
+                      </span>
+                      {timerMode === 'study' && activeSubject && <h3 className="text-2xl font-bold text-slate-100 mt-3">{activeSubject.name}</h3>}
+                    </div>
+                  )}
+
+                  <div className={`text-7xl font-black mb-8 relative z-10 tabular-nums tracking-tight ${timerMode === 'idle' ? 'text-slate-700' : timerMode === 'break' ? 'text-cyan-400' : 'text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-400'}`}>
+                    {timerMode === 'idle' ? '50:00' : formatTime(timeRemaining)}
+                  </div>
+
+                  <div className="flex gap-4 relative z-10">
+                    <button onClick={toggleTimer} disabled={timerMode === 'idle'} className={`p-5 rounded-full flex items-center justify-center transition-all ${timerMode === 'idle' ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : isRunning ? 'bg-amber-600 text-white shadow-lg' : 'bg-violet-600 text-white shadow-lg'}`}>
+                      {isRunning ? <Pause size={28} fill="currentColor"/> : <Play size={28} fill="currentColor" className="ml-1"/>}
+                    </button>
+                    <button onClick={stopTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-rose-400 transition-colors">
+                      <Square size={20} fill="currentColor"/>
+                    </button>
+                    <button onClick={skipTimer} disabled={timerMode === 'idle'} className="p-4 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-cyan-400 transition-colors">
+                      <SkipForward size={20} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Schedule & Subtopics */}
+                <div className="lg:col-span-7 bg-slate-900 p-6 md:p-8 rounded-3xl border border-slate-800 space-y-4 h-fit">
+                  <h2 className="text-xl font-extrabold text-slate-100 flex items-center gap-2">
+                    {currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'}
+                  </h2>
+                  
+                  {currentSubjects.map(subject => {
+                    const isComplete = subject.completed >= subject.target;
+                    const isActive = activeSubjectId === subject.id && timerMode === 'study';
+
+                    return (
+                      <div key={subject.id} className={`p-4 md:p-5 rounded-2xl border-2 transition-all ${isActive ? 'border-violet-500 bg-violet-950/20' : isComplete ? 'border-cyan-800/50 bg-cyan-900/10' : 'border-slate-800 bg-slate-950/40'}`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <h3 className={`font-bold text-lg flex items-center gap-2 ${isActive ? 'text-violet-300' : isComplete ? 'text-cyan-400' : 'text-slate-200'}`}>
+                              {subject.name} {isComplete && <CheckCircle size={16} className="text-cyan-500"/>}
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-1">{subject.completed} / {subject.target} sessions completed</p>
+                          </div>
+                          <button onClick={() => startStudySession(subject.id)} disabled={isActive} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${isActive ? 'bg-violet-900/30 text-violet-500 cursor-not-allowed' : 'bg-slate-800 text-violet-400 hover:bg-violet-600 hover:text-white'}`}>
+                            {isActive ? 'Running' : 'Start 50m'}
+                          </button>
+                        </div>
+
+                        <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800 mb-3">
+                          <div className={`h-full ${isComplete ? 'bg-cyan-500' : 'bg-violet-500'}`} style={{ width: `${Math.min(100, (subject.completed / subject.target) * 100)}%` }}></div>
+                        </div>
+
+                        {/* Subtopics Checklist */}
+                        <div className="pt-3 border-t border-slate-800/80 space-y-2">
+                          {subject.subtopics && subject.subtopics.map(sub => (
+                            <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 group">
+                              <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-sm cursor-pointer flex-grow ${sub.completed ? 'line-through text-slate-500' : 'text-slate-300'}`}>
+                                {sub.name}
+                              </span>
+                              <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                            </div>
+                          ))}
+                          <div className="flex gap-2 mt-2">
+                            <input 
+                              type="text" 
+                              value={newSubtopicText[subject.id] || ''}
+                              onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
+                              onKeyDown={(e) => { if(e.key === 'Enter') addSubtopic(subject.id); }}
+                              placeholder="Add subtopic..."
+                              className="bg-slate-950 border border-slate-800 text-xs text-slate-200 rounded-xl px-3 py-2 flex-grow outline-none focus:border-cyan-500"
+                            />
+                            <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-xs font-semibold transition-colors text-slate-200">Add</button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
             </div>
           );
         }
 
-        ReactDOM.render(<App />, document.getElementById('root'));
+        // Wait for React to load, then render
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
