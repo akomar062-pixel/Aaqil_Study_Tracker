@@ -44,7 +44,7 @@
         
         // --- ⚠️ CONFIGURE YOUR SUPABASE HERE ---
         const SUPABASE_URL = 'https://lkltuvpdrebexvoekywb.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; // <-- PASTE YOUR KEY HERE
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxrbHR1dnBkcmViZXh2b2VreXdiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg0NTIzMTksImV4cCI6MjEwNDAyODMxOX0.cCgvCZ7eZFqefAEp3aiEzqFfI3bBsZMN4fd1ujsdBNE'; 
         
         const supabase = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
@@ -52,18 +52,17 @@
         const BREAK_DURATION = 10 * 60; // 10 mins in seconds
         const TARGET_DAILY_HOURS = 14;
 
+        // Updated subject configuration per user request
         const initialSchedule = {
           day1: [
-            { id: 'm1', name: 'Medicine', target: 4, completed: 0, subtopics: [] },
-            { id: 's1', name: 'Surgery', target: 4, completed: 0, subtopics: [] },
+            { id: 'm1', name: 'Medicine', target: 5, completed: 0, subtopics: [] },
+            { id: 'pe1', name: 'Pediatrics', target: 5, completed: 0, subtopics: [] },
             { id: 'c1', name: 'Commed', target: 4, completed: 0, subtopics: [] },
-            { id: 'p1', name: 'Psychiatry', target: 2, completed: 0, subtopics: [] },
           ],
           day2: [
-            { id: 'pe1', name: 'Pediatrics', target: 4, completed: 0, subtopics: [] },
-            { id: 'g1', name: 'Gyn & Obs', target: 4, completed: 0, subtopics: [] },
+            { id: 's1', name: 'Surgery', target: 5, completed: 0, subtopics: [] },
+            { id: 'g1', name: 'Gyn & Obs', target: 5, completed: 0, subtopics: [] },
             { id: 'f1', name: 'Forensic', target: 4, completed: 0, subtopics: [] },
-            { id: 'p2', name: 'Psychiatry', target: 2, completed: 0, subtopics: [] },
           ]
         };
 
@@ -109,7 +108,7 @@
           const [authLoading, setAuthLoading] = useState(false);
           const [rememberMe, setRememberMe] = useState(true);
 
-          // Tracker State - Automatically gets today's real date (YYYY-MM-DD in local time)
+          // Real-time local date calculation (YYYY-MM-DD)
           const getTodayString = () => {
             const now = new Date();
             const year = now.getFullYear();
@@ -208,7 +207,6 @@
 
                   setScheduleData(prev => ({ ...prev, [selectedDate]: mergedData }));
                 } else {
-                  // Fresh template for this specific date
                   setScheduleData(prev => ({ ...prev, [selectedDate]: initialSchedule }));
                 }
               } catch (err) {
@@ -386,7 +384,6 @@
           const currentSubjects = (scheduleData[selectedDate] || initialSchedule)[currentDay] || [];
           const activeSubject = currentSubjects.find(s => s.id === activeSubjectId);
           
-          // 14-Hour Progress calculation for the currently selected date
           const dateSchedule = scheduleData[selectedDate] || initialSchedule;
           const totalCompletedHours = (dateSchedule.day1 || []).reduce((acc, curr) => acc + curr.completed, 0) + 
                                       (dateSchedule.day2 || []).reduce((acc, curr) => acc + curr.completed, 0);
