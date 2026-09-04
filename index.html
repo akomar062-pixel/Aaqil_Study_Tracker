@@ -143,48 +143,9 @@
           const [studyHistory, setStudyHistory] = useState([]);
           const [showHistory, setShowHistory] = useState(false);
 
-          useEffect(() => {
-            if (!supabase) return;
-            
-            supabase.auth.getSession().then(({ data: { session } }) => {
-              setUser(session?.user ?? null);
-            });
+          const todayString = getTodayString();
+          const isToday = selectedDate === todayString;
 
-            const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-              setUser(session?.user ?? null);
-            });
-            
-            return () => subscription.unsubscribe();
-          }, []);
-
-          const handleAuth = async (e) => {
-            e.preventDefault();
-            setAuthLoading(true);
-            setAuthError('');
-            
-            try {
-              if (isLoginView) {
-                const { error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
-                if (error) throw error;
-              } else {
-                const { error } = await supabase.auth.signUp({ email: authEmail, password: authPassword });
-                if (error) throw error;
-                alert("Account created successfully! You are now logged in.");
-              }
-            } catch (err) {
-              setAuthError(err.message);
-            } finally {
-              setAuthLoading(false);
-            }
-          };
-
-          const handleLogout = async () => {
-            if (window.confirm("Are you sure you want to log out?")) {
-              await supabase.auth.signOut();
-            }
-          };
-
-          // Fetch Data specifically mapped to the selectedDate and user
           useEffect(() => {
             async function fetchData() {
               if (!supabase || !user) return;
@@ -451,7 +412,14 @@
                 </div>
 
                 <div className="flex flex-wrap gap-4 items-center relative z-10">
-                  <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); stopTimer(); }} className="bg-slate-950 border border-slate-700 text-slate-200 text-lg rounded-xl px-4 py-3 outline-none cursor-pointer hover:border-cyan-500 transition" />
+                  <div className="flex items-center gap-2">
+                    <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); stopTimer(); }} className="bg-slate-950 border border-slate-700 text-slate-200 text-lg rounded-xl px-4 py-3 outline-none cursor-pointer hover:border-cyan-500 transition" />
+                    {!isToday && (
+                      <button onClick={() => { setSelectedDate(todayString); stopTimer(); setShowHistory(false); }} className="px-4 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold transition shadow-md whitespace-nowrap">
+                        Go to Today
+                      </button>
+                    )}
+                  </div>
                   
                   <div className="flex bg-slate-950 p-1.5 rounded-2xl border border-slate-800">
                     <button onClick={() => { setCurrentDay('day1'); stopTimer(); }} className={`px-6 py-3 rounded-xl font-bold text-lg transition-all ${currentDay === 'day1' ? 'bg-slate-800 text-violet-400 shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>Day 1</button>
@@ -540,7 +508,13 @@
                 <div className="lg:col-span-5 bg-slate-900 p-8 rounded-3xl border border-slate-800 flex flex-col items-center justify-center text-center shadow-xl relative overflow-hidden min-h-[450px]">
                    <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-72 h-72 rounded-full blur-3xl opacity-10 pointer-events-none transition-all duration-1000 ${timerMode === 'study' ? 'bg-violet-500' : timerMode === 'break' ? 'bg-cyan-500' : 'bg-transparent'}`}></div>
 
-                  {timerMode === 'idle' ? (
+                  {!isToday ? (
+                    <div className="mb-8 relative z-10">
+                      <i className="fas fa-lock text-5xl text-slate-700 mb-4 block"></i>
+                      <h2 className="text-2xl font-bold text-slate-400">History Mode</h2>
+                      <p className="text-lg text-slate-500 mt-2">Return to today to start studying.</p>
+                    </div>
+                  ) : timerMode === 'idle' ? (
                     <div className="mb-8 relative z-10">
                       <i className="fas fa-book-open text-5xl text-slate-700 mb-4 block"></i>
                       <h2 className="text-2xl font-bold text-slate-300">Ready to Focus?</h2>
@@ -561,13 +535,13 @@
                   </div>
 
                   <div className="flex gap-5 relative z-10">
-                    <button onClick={toggleTimer} disabled={timerMode === 'idle'} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${timerMode === 'idle' ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : isRunning ? 'bg-amber-600 text-white shadow-lg hover:bg-amber-500' : 'bg-violet-600 text-white shadow-lg hover:bg-violet-500'}`}>
+                    <button onClick={toggleTimer} disabled={timerMode === 'idle' || !isToday} className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${timerMode === 'idle' || !isToday ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : isRunning ? 'bg-amber-600 text-white shadow-lg hover:bg-amber-500' : 'bg-violet-600 text-white shadow-lg hover:bg-violet-500'}`}>
                       {isRunning ? <i className="fas fa-pause text-3xl"></i> : <i className="fas fa-play text-3xl ml-1"></i>}
                     </button>
-                    <button onClick={stopTimer} disabled={timerMode === 'idle'} className="w-16 h-16 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-rose-400 transition-colors flex items-center justify-center shadow-md">
+                    <button onClick={stopTimer} disabled={timerMode === 'idle' || !isToday} className="w-16 h-16 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-rose-400 transition-colors flex items-center justify-center shadow-md">
                       <i className="fas fa-square text-xl"></i>
                     </button>
-                    <button onClick={skipTimer} disabled={timerMode === 'idle'} className="w-16 h-16 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-cyan-400 transition-colors flex items-center justify-center shadow-md">
+                    <button onClick={skipTimer} disabled={timerMode === 'idle' || !isToday} className="w-16 h-16 rounded-full bg-slate-800 text-slate-400 disabled:opacity-30 hover:bg-slate-700 hover:text-cyan-400 transition-colors flex items-center justify-center shadow-md">
                       <i className="fas fa-forward-step text-xl"></i>
                     </button>
                   </div>
@@ -575,10 +549,17 @@
 
                 {/* Schedule & Subtopics List */}
                 <div className="lg:col-span-7 bg-slate-900 p-8 rounded-3xl border border-slate-800 space-y-5 shadow-xl">
-                  <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3 mb-6">
-                    <i className="fas fa-list-check text-violet-400"></i>
-                    {currentDay === 'day1' ? 'Day 1 Schedule' : 'Day 2 Schedule'} — <span className="text-cyan-400">{selectedDate}</span>
-                  </h2>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                    <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3">
+                      <i className="fas fa-list-check text-violet-400"></i>
+                      {currentDay === 'day1' ? 'Day 1' : 'Day 2'} — <span className="text-cyan-400">{selectedDate}</span>
+                    </h2>
+                    {!isToday && (
+                      <span className="px-4 py-2 text-sm font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-xl flex items-center gap-2">
+                        <i className="fas fa-lock"></i> Read Only
+                      </span>
+                    )}
+                  </div>
                   
                   {currentSubjects.map(subject => {
                     const isComplete = subject.completed >= subject.target;
@@ -595,9 +576,11 @@
                           </div>
                           
                           {!isComplete ? (
-                            <button onClick={() => startStudySession(subject.id)} disabled={isActive} className={`px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-sm ${isActive ? 'bg-violet-900/40 text-violet-500 cursor-not-allowed' : 'bg-slate-800 text-violet-400 hover:bg-violet-600 hover:text-white hover:shadow-violet-900/50 border border-violet-800/30'}`}>
+                            <button onClick={() => startStudySession(subject.id)} disabled={isActive || !isToday} className={`px-6 py-3 rounded-xl text-sm font-bold transition-all shadow-sm ${isActive ? 'bg-violet-900/40 text-violet-500 cursor-not-allowed' : !isToday ? 'bg-slate-800/50 text-slate-500 cursor-not-allowed opacity-60' : 'bg-slate-800 text-violet-400 hover:bg-violet-600 hover:text-white hover:shadow-violet-900/50 border border-violet-800/30'}`}>
                               {isActive ? (
                                 <><i className="fas fa-spinner fa-spin mr-2"></i>Running</>
+                              ) : !isToday ? (
+                                <><i className="fas fa-lock mr-2"></i>Locked</>
                               ) : (
                                 <><i className="fas fa-play mr-2"></i>Start 50m</>
                               )}
@@ -618,29 +601,33 @@
                           
                           {subject.subtopics && subject.subtopics.map(sub => (
                             <div key={sub.id} className="flex items-center justify-between bg-slate-900 px-4 py-3 rounded-xl border border-slate-700/60 group hover:border-slate-600 transition-colors">
-                              <span onClick={() => toggleSubtopic(subject.id, sub.id)} className={`text-base cursor-pointer flex-grow flex items-center gap-3 select-none ${sub.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                              <span onClick={() => isToday && toggleSubtopic(subject.id, sub.id)} className={`text-base flex-grow flex items-center gap-3 select-none ${isToday ? 'cursor-pointer' : 'cursor-not-allowed'} ${sub.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
                                 <i className={`fas ${sub.completed ? 'fa-square-check text-cyan-400 text-lg' : 'fa-square text-slate-600 text-lg'}`}></i>
                                 {sub.name}
                               </span>
-                              <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-slate-500 hover:text-rose-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete Subtopic">
-                                <i className="fas fa-trash-can"></i>
-                              </button>
+                              {isToday && (
+                                <button onClick={() => deleteSubtopic(subject.id, sub.id)} className="text-slate-500 hover:text-rose-400 p-2 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete Subtopic">
+                                  <i className="fas fa-trash-can"></i>
+                                </button>
+                              )}
                             </div>
                           ))}
                           
-                          <div className="flex gap-3 mt-3">
-                            <input 
-                              type="text" 
-                              value={newSubtopicText[subject.id] || ''}
-                              onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
-                              onKeyDown={(e) => { if(e.key === 'Enter') addSubtopic(subject.id); }}
-                              placeholder="Add a new subtopic..."
-                              className="bg-slate-950 border border-slate-800 text-base text-slate-200 rounded-xl px-4 py-3 flex-grow outline-none focus:border-cyan-500 shadow-inner transition"
-                            />
-                            <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl text-base font-bold transition-colors text-slate-200 border border-slate-700/50 flex items-center gap-2 shadow-sm">
-                              <i className="fas fa-plus"></i> Add
-                            </button>
-                          </div>
+                          {isToday && (
+                            <div className="flex gap-3 mt-3">
+                              <input 
+                                type="text" 
+                                value={newSubtopicText[subject.id] || ''}
+                                onChange={(e) => setNewSubtopicText({ ...newSubtopicText, [subject.id]: e.target.value })}
+                                onKeyDown={(e) => { if(e.key === 'Enter') addSubtopic(subject.id); }}
+                                placeholder="Add a new subtopic..."
+                                className="bg-slate-950 border border-slate-800 text-base text-slate-200 rounded-xl px-4 py-3 flex-grow outline-none focus:border-cyan-500 shadow-inner transition"
+                              />
+                              <button onClick={() => addSubtopic(subject.id)} className="bg-slate-800 hover:bg-slate-700 px-6 py-3 rounded-xl text-base font-bold transition-colors text-slate-200 border border-slate-700/50 flex items-center gap-2 shadow-sm">
+                                <i className="fas fa-plus"></i> Add
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
