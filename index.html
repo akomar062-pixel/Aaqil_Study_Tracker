@@ -30,6 +30,11 @@
             50% { box-shadow: 0 0 30px rgba(251, 191, 36, 0.9); }
             100% { box-shadow: 0 0 10px rgba(251, 191, 36, 0.4); }
         }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fade-in 0.3s ease-out forwards; }
         /* Hide scrollbar for a cleaner look */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
@@ -111,8 +116,12 @@
           const [rememberMe, setRememberMe] = useState(true);
 
           // Real-time local date calculation (YYYY-MM-DD)
+          // Adjusted to reset the study day at 10:00 AM for late-night studying
           const getTodayString = () => {
             const now = new Date();
+            if (now.getHours() < 10) {
+              now.setDate(now.getDate() - 1);
+            }
             const year = now.getFullYear();
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const day = String(now.getDate()).padStart(2, '0');
@@ -131,6 +140,8 @@
           const [activeSubjectId, setActiveSubjectId] = useState(null);
           
           const [dbError, setDbError] = useState(null);
+          const [studyHistory, setStudyHistory] = useState([]);
+          const [showHistory, setShowHistory] = useState(false);
 
           useEffect(() => {
             if (!supabase) return;
@@ -181,16 +192,23 @@
               setDbError(null);
               
               try {
-                const { data, error } = await supabase
+                // Fetch ALL historical records for this user
+                const { data: historyData, error: historyError } = await supabase
                   .from('study_records')
-                  .select('data')
+                  .select('date_key, data')
                   .eq('user_id', user.id)
-                  .eq('date_key', selectedDate);
+                  .order('date_key', { ascending: false });
                 
-                if (error) throw error;
+                if (historyError) throw historyError;
 
-                if (data && data.length > 0) {
-                  const savedData = data[0].data;
+                if (historyData) {
+                  setStudyHistory(historyData);
+                }
+
+                const todayData = historyData?.find(r => r.date_key === selectedDate);
+
+                if (todayData) {
+                  const savedData = todayData.data;
                   
                   const mergeDay = (savedDay, initialDay) => {
                     return initialDay.map(initialSubj => {
@@ -246,6 +264,19 @@
                   .insert([{ user_id: user.id, date_key: selectedDate, data: newDateData }]);
                 if (insertError) throw insertError;
               }
+
+              // Update local history array instantly so the UI reflects it
+              setStudyHistory(prev => {
+                const existingIndex = prev.findIndex(r => r.date_key === selectedDate);
+                const newRecord = { date_key: selectedDate, data: newDateData };
+                if (existingIndex >= 0) {
+                  const updated = [...prev];
+                  updated[existingIndex] = newRecord;
+                  return updated;
+                }
+                return [newRecord, ...prev].sort((a, b) => b.date_key.localeCompare(a.date_key));
+              });
+
             } catch (err) {
               console.error("Error saving data:", err);
               setDbError(`Failed to save progress: ${err.message}. (Check Supabase RLS policies!)`);
@@ -427,11 +458,53 @@
                     <button onClick={() => { setCurrentDay('day2'); stopTimer(); }} className={`px-6 py-3 rounded-xl font-bold text-lg transition-all ${currentDay === 'day2' ? 'bg-slate-800 text-violet-400 shadow-md' : 'text-slate-500 hover:text-slate-300'}`}>Day 2</button>
                   </div>
                   
+                  <button onClick={() => setShowHistory(!showHistory)} className={`px-6 py-3 rounded-xl font-bold text-lg transition-all border shadow-sm flex items-center gap-2 ${showHistory ? 'bg-cyan-900/30 text-cyan-400 border-cyan-800/50' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-transparent hover:border-slate-600'}`}>
+                    <i className="fas fa-chart-simple"></i> History
+                  </button>
+
                   <button onClick={handleLogout} className="px-6 py-3 bg-slate-800 hover:bg-rose-900 hover:text-rose-200 rounded-xl text-rose-400 font-bold text-lg transition border border-transparent hover:border-rose-800 shadow-sm flex items-center gap-2">
                     <i className="fas fa-arrow-right-from-bracket"></i> Logout
                   </button>
                 </div>
               </header>
+
+              {/* STUDY HISTORY PANEL */}
+              {showHistory && (
+                <div className="bg-slate-900 p-8 rounded-3xl border border-cyan-800/50 shadow-xl mb-8 animate-fade-in relative z-20">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-extrabold text-cyan-400 flex items-center gap-3">
+                      <i className="fas fa-calendar-check"></i> Study History Log
+                    </h2>
+                    <button onClick={() => setShowHistory(false)} className="text-slate-400 hover:text-rose-400"><i className="fas fa-xmark text-3xl"></i></button>
+                  </div>
+                  
+                  {studyHistory.length === 0 ? (
+                    <p className="text-slate-400 text-lg">No study records found yet. Finish your first 50m block!</p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {studyHistory.map(record => {
+                        const day1Total = (record.data.day1 || []).reduce((acc, curr) => acc + curr.completed, 0);
+                        const day2Total = (record.data.day2 || []).reduce((acc, curr) => acc + curr.completed, 0);
+                        const totalHours = day1Total + day2Total;
+                        const hitGoal = totalHours >= TARGET_DAILY_HOURS;
+                        const isCurrentDate = record.date_key === selectedDate;
+                        
+                        return (
+                          <div key={record.date_key} onClick={() => { setSelectedDate(record.date_key); setShowHistory(false); }} className={`p-5 rounded-2xl border-2 cursor-pointer transition-all hover:scale-105 ${isCurrentDate ? 'bg-cyan-900/30 border-cyan-500 shadow-lg' : hitGoal ? 'bg-amber-500/10 border-amber-500/50' : 'bg-slate-950 border-slate-800 hover:border-cyan-500/50'}`}>
+                            <p className={`font-bold text-lg mb-1 ${hitGoal ? 'text-amber-400' : 'text-slate-200'}`}>
+                              {record.date_key} {hitGoal && <i className="fas fa-star text-amber-500 ml-1 drop-shadow-md"></i>}
+                            </p>
+                            <div className="flex items-end justify-between mt-3">
+                              <span className="text-slate-400 text-sm font-medium">Total Completed:</span>
+                              <span className={`text-2xl font-black ${hitGoal ? 'text-amber-400' : 'text-cyan-400'}`}>{totalHours}h</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 14-HOUR GOLD PROGRESS BAR */}
               <div className={`bg-slate-900 p-8 rounded-3xl border ${isTargetMet ? 'border-amber-500 gold-glow progress-pulse' : 'border-slate-800 shadow-lg'}`}>
