@@ -55,9 +55,9 @@
 
         const STUDY_DURATION = 50 * 60; // 50 mins in seconds
         const BREAK_DURATION = 10 * 60; // 10 mins in seconds
-        const TARGET_DAILY_HOURS = 14;
+        const TARGET_DAILY_HOURS = 14; // 14 hours total
 
-        // Updated subject configuration per user request
+        // Updated subject configuration targeting 14 hours exactly per day
         const initialSchedule = {
           day1: [
             { id: 'm1', name: 'Medicine', target: 4, completed: 0, subtopics: [] },
@@ -116,9 +116,10 @@
           const [rememberMe, setRememberMe] = useState(true);
 
           // Real-time local date calculation (YYYY-MM-DD)
-          // Adjusted to reset the study day at 10:00 AM for late-night studying
+          // Includes 10:00 AM Rollover Logic
           const getTodayString = () => {
             const now = new Date();
+            // If it's before 10 AM, treat it as the previous day
             if (now.getHours() < 10) {
               now.setDate(now.getDate() - 1);
             }
@@ -134,10 +135,12 @@
           
           const [newSubtopicText, setNewSubtopicText] = useState({});
           
+          // Timer State (Real-Time Synchronized)
           const [timerMode, setTimerMode] = useState('idle');
           const [timeRemaining, setTimeRemaining] = useState(0);
           const [isRunning, setIsRunning] = useState(false);
           const [activeSubjectId, setActiveSubjectId] = useState(null);
+          const [targetEndTime, setTargetEndTime] = useState(null);
           
           const [dbError, setDbError] = useState(null);
           const [studyHistory, setStudyHistory] = useState([]);
@@ -212,11 +215,13 @@
                   setStudyHistory(historyData);
                 }
 
+                // Find data specifically for the currently selected date
                 const todayData = historyData?.find(r => r.date_key === selectedDate);
 
                 if (todayData) {
                   const savedData = todayData.data;
                   
+                  // Smart Merge: Combines saved subtopics/hours with our base template
                   const mergeDay = (savedDay, initialDay) => {
                     return initialDay.map(initialSubj => {
                       const savedSubj = (savedDay || []).find(s => s.id === initialSubj.id);
@@ -234,6 +239,7 @@
 
                   setScheduleData(prev => ({ ...prev, [selectedDate]: mergedData }));
                 } else {
+                  // No data exists for this day yet, use fresh template
                   setScheduleData(prev => ({ ...prev, [selectedDate]: initialSchedule }));
                 }
               } catch (err) {
@@ -251,6 +257,7 @@
             if (!supabase || !user) return;
             
             try {
+              // Check if a row already exists for this date and user
               const { data: existing, error: selectError } = await supabase
                 .from('study_records')
                 .select('id')
@@ -260,12 +267,14 @@
               if (selectError) throw selectError;
 
               if (existing && existing.length > 0) {
+                // Update existing record
                 const { error: updateError } = await supabase
                   .from('study_records')
                   .update({ data: newDateData })
                   .eq('id', existing[0].id);
                 if (updateError) throw updateError;
               } else {
+                // Insert new record
                 const { error: insertError } = await supabase
                   .from('study_records')
                   .insert([{ user_id: user.id, date_key: selectedDate, data: newDateData }]);
@@ -286,19 +295,24 @@
 
             } catch (err) {
               console.error("Error saving data:", err);
-              setDbError(`Failed to save progress: ${err.message}. (Check Supabase RLS policies!)`);
+              setDbError(`Failed to save progress: ${err.message}. (Did you disable RLS?)`);
             }
           };
 
           useEffect(() => {
             let interval = null;
-            if (isRunning && timeRemaining > 0) {
-              interval = setInterval(() => setTimeRemaining(prev => prev - 1), 1000);
-            } else if (isRunning && timeRemaining === 0) {
+            if (isRunning && timeRemaining > 0 && targetEndTime) {
+              // Calculate remaining time based on real-world clock, not just interval cycles
+              interval = setInterval(() => {
+                const now = Date.now();
+                const remaining = Math.max(0, Math.round((targetEndTime - now) / 1000));
+                setTimeRemaining(remaining);
+              }, 500); // Check every half-second for accuracy
+            } else if (isRunning && timeRemaining <= 0) {
               handleTimerComplete();
             }
             return () => clearInterval(interval);
-          }, [isRunning, timeRemaining]);
+          }, [isRunning, timeRemaining, targetEndTime]);
 
           const handleTimerComplete = () => {
             if (timerMode === 'study') {
@@ -313,6 +327,7 @@
               }
               setTimerMode('break');
               setTimeRemaining(BREAK_DURATION);
+              setTargetEndTime(Date.now() + BREAK_DURATION * 1000);
               setIsRunning(true);
               
             } else if (timerMode === 'break') {
@@ -320,6 +335,7 @@
               setTimerMode('idle');
               setActiveSubjectId(null);
               setIsRunning(false);
+              setTargetEndTime(null);
             }
           };
 
@@ -327,12 +343,23 @@
             setActiveSubjectId(subjectId);
             setTimerMode('study');
             setTimeRemaining(STUDY_DURATION);
+            setTargetEndTime(Date.now() + STUDY_DURATION * 1000);
             setIsRunning(true);
           };
 
-          const toggleTimer = () => setIsRunning(!isRunning);
-          const stopTimer = () => { setIsRunning(false); setTimerMode('idle'); setActiveSubjectId(null); setTimeRemaining(0); };
-          const skipTimer = () => setTimeRemaining(0);
+          const toggleTimer = () => {
+            if (!isRunning) {
+              // Resuming: set target time based on exact seconds left
+              setTargetEndTime(Date.now() + timeRemaining * 1000);
+            } else {
+              // Pausing
+              setTargetEndTime(null);
+            }
+            setIsRunning(!isRunning);
+          };
+          
+          const stopTimer = () => { setIsRunning(false); setTimerMode('idle'); setActiveSubjectId(null); setTimeRemaining(0); setTargetEndTime(null); };
+          const skipTimer = () => { setTimeRemaining(0); setTargetEndTime(null); };
 
           const addSubtopic = (subjectId) => {
             const text = (newSubtopicText[subjectId] || '').trim();
@@ -388,7 +415,7 @@
                   <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-violet-400 to-fuchsia-400 mb-2 flex items-center gap-3">
                     Med-Study Tracker <i className="fas fa-rocket text-cyan-400 text-3xl"></i>
                   </h1>
-                  <p className="text-slate-400 text-lg mb-8">Log in to sync your study data to your private cloud.</p>
+                  <p className="text-slate-400 text-lg mb-8">Log in to sync your study data securely.</p>
                   
                   {authError && <div className="bg-rose-900/30 text-rose-400 p-4 rounded-xl mb-6 text-base border border-rose-800/50 flex items-center gap-2"><i className="fas fa-circle-exclamation"></i> {authError}</div>}
                   
@@ -520,7 +547,6 @@
                 </div>
               )}
 
-              {}
               <div className={`bg-slate-900 p-8 rounded-3xl border ${isTargetMet ? 'border-amber-500 gold-glow progress-pulse' : 'border-slate-800 shadow-lg'}`}>
                 <div className="flex justify-between items-end mb-4">
                   <div>
@@ -593,7 +619,6 @@
                   </div>
                 </div>
 
-                {/* Schedule & Subtopics List */}
                 <div className="lg:col-span-7 bg-slate-900 p-8 rounded-3xl border border-slate-800 space-y-5 shadow-xl">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <h2 className="text-2xl font-extrabold text-slate-100 flex items-center gap-3">
